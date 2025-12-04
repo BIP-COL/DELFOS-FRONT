@@ -55,9 +55,9 @@ export function SidebarLinks(props: SidebarLinksProps) {
     return routes.map((route, key) => {
       if (route.collapse && !route.invisible) {
         return (
-          <Accordion defaultIndex={0} allowToggle key={key}>
+          <Accordion defaultIndex={0} allowToggle key={route.path ?? route.name}>
             <Flex w="100%" justifyContent={'space-between'}>
-              <AccordionItem isDisabled border="none" mb="14px" key={key}>
+              <AccordionItem border="none" mb="14px" key={route.path ?? route.name}>
                 <AccordionButton
                   display="flex"
                   alignItems="center"

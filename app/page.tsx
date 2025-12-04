@@ -21,8 +21,6 @@ import {
 } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
 import { MdAutoAwesome, MdBolt, MdEdit, MdPerson } from 'react-icons/md';
-import Bg from '../public/img/chat/bg-image.png';
-
 export default function Chat(props: { apiKeyApp: string }) {
   // Input States
   const [inputOnSubmit, setInputOnSubmit] = useState<string>('');
@@ -62,11 +60,7 @@ export default function Chat(props: { apiKeyApp: string }) {
     // Chat post conditions(maximum number of characters, valid message etc.)
     const maxCodeLength = model === 'gpt-4o' ? 700 : 700;
 
-    if (!apiKey?.includes('sk-')) {
-      alert('Please enter an API key.');
-      return;
-    }
-
+    
     if (!inputCode) {
       alert('Please enter your message.');
       return;
@@ -82,20 +76,21 @@ export default function Chat(props: { apiKeyApp: string }) {
     setLoading(true);
     const controller = new AbortController();
     const body: ChatBody = {
-      inputCode,
-      model,
-      apiKey,
+      inputCode
     };
 
     // -------------- Fetch --------------
     const response = await fetch('./api/chatAPI', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-      body: JSON.stringify(body),
-    });
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    signal: controller.signal,
+    body: JSON.stringify({
+      inputCode: body.inputCode,   // este es el mensaje del usuario
+    }),
+  });
+
 
     if (!response.ok) {
       setLoading(false);
@@ -160,12 +155,13 @@ export default function Chat(props: { apiKeyApp: string }) {
       position="relative"
     >
       <Img
-        src={Bg.src}
+        src="/img/chat/bg-image.png"
         position={'absolute'}
         w="350px"
         left="50%"
         top="50%"
         transform={'translate(-50%, -50%)'}
+        alt="Background image"
       />
       <Flex
         direction="column"
