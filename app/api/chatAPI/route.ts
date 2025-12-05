@@ -13,7 +13,7 @@ export async function POST(req: Request): Promise<Response> {
       user_id: userId ?? "anonymous",
     };
 
-    const backendRes = await fetch("/api/chat", {
+    const backendRes = await fetch(BACKEND_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
