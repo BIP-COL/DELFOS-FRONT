@@ -2,37 +2,15 @@
 /*eslint-disable*/
 
 import Link from '@/components/link/Link';
-import { ChatBody, OpenAIModel } from '@/types/types';
-import {
-  Accordion,
-  AccordionButton,
-  AccordionIcon,
-  AccordionItem,
-  AccordionPanel,
-  Box,
-  Button,
-  Flex,
-  Icon,
-  Input,
-  Text,
-  useColorModeValue,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
-} from '@chakra-ui/react';
+import { ChatBody } from '@/types/types';
+import { Box, Button, Flex, Input, Text, useColorModeValue, Table, Thead, Tbody, Tr, Th, Td } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
-import { MdAutoAwesome, MdBolt, MdEdit, MdPerson } from 'react-icons/md';
-export default function Chat(props: { apiKeyApp: string }) {
+export default function Chat() {
   // Input States
   const [inputCode, setInputCode] = useState<string>('');
   const [history, setHistory] = useState<
     Array<{ question: string; formatted: any }>
   >([]);
-  // ChatGPT model
-  const [model, setModel] = useState<OpenAIModel>('gpt-4o');
   // Loading state
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -41,17 +19,7 @@ export default function Chat(props: { apiKeyApp: string }) {
   const borderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
   const inputColor = useColorModeValue('navy.700', 'white');
   const brandColor = '#0F4C9B';
-  const accentColor = '#D1342C';
-  const iconColor = useColorModeValue(brandColor, 'white');
-  const bgIcon = useColorModeValue(brandColor, brandColor);
-  const buttonBg = useColorModeValue('#F5F8FF', 'whiteAlpha.100');
-  const gray = useColorModeValue('gray.500', 'white');
-  const buttonShadow = useColorModeValue(
-    '14px 27px 45px rgba(112, 144, 176, 0.2)',
-    'none',
-  );
   const textColor = useColorModeValue('navy.700', 'white');
-  const cardBg = useColorModeValue('white', 'navy.900');
   const questionBg = useColorModeValue('gray.50', 'whiteAlpha.100');
   const bubbleTailColor = useColorModeValue('#F7FAFC', 'rgba(255,255,255,0.08)');
   const placeholderColor = useColorModeValue(
@@ -60,10 +28,9 @@ export default function Chat(props: { apiKeyApp: string }) {
   );
   const hasHistory = history.length > 0;
   const handleTranslate = async () => {
-    let apiKey = localStorage.getItem('apiKey');
 
     // Chat post conditions(maximum number of characters, valid message etc.)
-    const maxCodeLength = model === 'gpt-4o' ? 700 : 700;
+    const maxCodeLength = 700;
 
     
     if (!inputCode) {
@@ -152,19 +119,35 @@ export default function Chat(props: { apiKeyApp: string }) {
     setInputCode(Event.target.value);
   };
 
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   return (
     <Flex
       w="100%"
+      h="100vh"
+      position="fixed"
+      top="0"
+      left="0"
+      right="0"
+      bottom="0"
       pt={{ base: '110px', md: '110px' }}
       direction="column"
-      position="relative"
+      overflow="hidden"
     >
       <Flex
         direction="column"
+        flex="1"
         mx="auto"
         w={{ base: '100%', md: '100%', xl: '100%' }}
         maxW="820px"
-        pb="32px"
+        pb="0"
+        minH="0"
       >
         {/* Main Box */}
         <Flex
@@ -173,6 +156,11 @@ export default function Chat(props: { apiKeyApp: string }) {
           mx="auto"
           display={hasHistory ? 'flex' : 'none'}
           mb="8px"
+          flex="1"
+          minH="0"
+          overflowY="auto"
+          overflowX="hidden"
+          pb={{ base: '80px', md: '64px' }}
         >
           <Flex w="100%" direction="column" gap="20px">
             {history.map((item, idx) => (
@@ -277,13 +265,13 @@ export default function Chat(props: { apiKeyApp: string }) {
             ))}
           </Flex>
         </Flex>
-        {/* Chat Input */}
-        <Flex
-          position="fixed"
-          bottom="20px"
-          left="0"
-          right="0"
-          px={{ base: '12px', md: '24px' }}
+      {/* Chat Input */}
+      <Flex
+        position="fixed"
+        bottom="0"
+        left="0"
+        right="0"
+        px={{ base: '12px', md: '24px' }}
           justify="center"
           zIndex="50"
         >
