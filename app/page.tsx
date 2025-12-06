@@ -1,8 +1,7 @@
-'use client';
+﻿'use client';
 /*eslint-disable*/
 
 import Link from '@/components/link/Link';
-import MessageBoxChat from '@/components/MessageBox';
 import { ChatBody, OpenAIModel } from '@/types/types';
 import {
   Accordion,
@@ -14,19 +13,24 @@ import {
   Button,
   Flex,
   Icon,
-  Img,
   Input,
   Text,
   useColorModeValue,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
 } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
 import { MdAutoAwesome, MdBolt, MdEdit, MdPerson } from 'react-icons/md';
 export default function Chat(props: { apiKeyApp: string }) {
   // Input States
-  const [inputOnSubmit, setInputOnSubmit] = useState<string>('');
   const [inputCode, setInputCode] = useState<string>('');
-  // Response message
-  const [outputCode, setOutputCode] = useState<string>('');
+  const [history, setHistory] = useState<
+    Array<{ question: string; formatted: any }>
+  >([]);
   // ChatGPT model
   const [model, setModel] = useState<OpenAIModel>('gpt-4o');
   // Loading state
@@ -36,26 +40,27 @@ export default function Chat(props: { apiKeyApp: string }) {
   // const [apiKey, setApiKey] = useState<string>(apiKeyApp);
   const borderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
   const inputColor = useColorModeValue('navy.700', 'white');
-  const iconColor = useColorModeValue('brand.500', 'white');
-  const bgIcon = useColorModeValue(
-    'linear-gradient(180deg, #FBFBFF 0%, #CACAFF 100%)',
-    'whiteAlpha.200',
-  );
-  const brandColor = useColorModeValue('brand.500', 'white');
-  const buttonBg = useColorModeValue('white', 'whiteAlpha.100');
+  const brandColor = '#0F4C9B';
+  const accentColor = '#D1342C';
+  const iconColor = useColorModeValue(brandColor, 'white');
+  const bgIcon = useColorModeValue(brandColor, brandColor);
+  const buttonBg = useColorModeValue('#F5F8FF', 'whiteAlpha.100');
   const gray = useColorModeValue('gray.500', 'white');
   const buttonShadow = useColorModeValue(
     '14px 27px 45px rgba(112, 144, 176, 0.2)',
     'none',
   );
   const textColor = useColorModeValue('navy.700', 'white');
+  const cardBg = useColorModeValue('white', 'navy.900');
+  const questionBg = useColorModeValue('gray.50', 'whiteAlpha.100');
+  const bubbleTailColor = useColorModeValue('#F7FAFC', 'rgba(255,255,255,0.08)');
   const placeholderColor = useColorModeValue(
     { color: 'gray.500' },
     { color: 'whiteAlpha.600' },
   );
+  const hasHistory = history.length > 0;
   const handleTranslate = async () => {
     let apiKey = localStorage.getItem('apiKey');
-    setInputOnSubmit(inputCode);
 
     // Chat post conditions(maximum number of characters, valid message etc.)
     const maxCodeLength = model === 'gpt-4o' ? 700 : 700;
@@ -72,7 +77,6 @@ export default function Chat(props: { apiKeyApp: string }) {
       );
       return;
     }
-    setOutputCode(' ');
     setLoading(true);
     const controller = new AbortController();
     const body: ChatBody = {
@@ -81,47 +85,48 @@ export default function Chat(props: { apiKeyApp: string }) {
 
     // -------------- Fetch --------------
     const response = await fetch('./api/chatAPI', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    signal: controller.signal,
-    body: JSON.stringify({
-      inputCode: body.inputCode,   // este es el mensaje del usuario
-    }),
-  });
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        inputCode: body.inputCode,   // este es el mensaje del usuario
+      }),
+    });
 
+    const rawText = await response.text();
 
     if (!response.ok) {
       setLoading(false);
-      if (response) {
-        alert(
-          'Something went wrong went fetching from the API. Make sure to use a valid API key.',
-        );
-      }
+      alert(rawText || 'Something went wrong fetching from the API.');
       return;
     }
 
-    const data = response.body;
-
-    if (!data) {
+    let data: any;
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (err) {
       setLoading(false);
-      alert('Something went wrong');
+      alert(`Respuesta no es JSON: ${rawText}`);
       return;
     }
 
-    const reader = data.getReader();
-    const decoder = new TextDecoder();
-    let done = false;
-
-    while (!done) {
-      setLoading(true);
-      const { value, done: doneReading } = await reader.read();
-      done = doneReading;
-      const chunkValue = decoder.decode(value);
-      setOutputCode((prevCode) => prevCode + chunkValue);
+    // Prefer top-level formatted_response; fallback to FormatAgent parsed_response
+    let formatted = data?.formatted_response;
+    if (!formatted && Array.isArray(data?.agent_outputs)) {
+      formatted = data.agent_outputs.find(
+        (item: any) =>
+          item?.agent_name?.toLowerCase() === 'formatagent' &&
+          item?.parsed_response,
+      )?.parsed_response;
     }
-
+    if (!formatted) {
+      alert('No se encontró formatted_response en la respuesta.');
+      setLoading(false);
+      return;
+    }
+    setHistory((prev) => [...prev, { question: inputCode, formatted }]);
     setLoading(false);
   };
   // -------------- Copy Response --------------
@@ -150,275 +155,201 @@ export default function Chat(props: { apiKeyApp: string }) {
   return (
     <Flex
       w="100%"
-      pt={{ base: '70px', md: '0px' }}
+      pt={{ base: '110px', md: '110px' }}
       direction="column"
       position="relative"
     >
-      <Img
-        src="/img/chat/bg-image.png"
-        position={'absolute'}
-        w="350px"
-        left="50%"
-        top="50%"
-        transform={'translate(-50%, -50%)'}
-        alt="Background image"
-      />
       <Flex
         direction="column"
         mx="auto"
         w={{ base: '100%', md: '100%', xl: '100%' }}
-        minH={{ base: '75vh', '2xl': '85vh' }}
-        maxW="1000px"
+        maxW="820px"
+        pb="32px"
       >
-        {/* Model Change */}
-        <Flex direction={'column'} w="100%" mb={outputCode ? '20px' : 'auto'}>
-          <Flex
-            mx="auto"
-            zIndex="2"
-            w="max-content"
-            mb="20px"
-            borderRadius="60px"
-          >
-            <Flex
-              cursor={'pointer'}
-              transition="0.3s"
-              justify={'center'}
-              align="center"
-              bg={model === 'gpt-4o' ? buttonBg : 'transparent'}
-              w="174px"
-              h="70px"
-              boxShadow={model === 'gpt-4o' ? buttonShadow : 'none'}
-              borderRadius="14px"
-              color={textColor}
-              fontSize="18px"
-              fontWeight={'700'}
-              onClick={() => setModel('gpt-4o')}
-            >
-              <Flex
-                borderRadius="full"
-                justify="center"
-                align="center"
-                bg={bgIcon}
-                me="10px"
-                h="39px"
-                w="39px"
-              >
-                <Icon
-                  as={MdAutoAwesome}
-                  width="20px"
-                  height="20px"
-                  color={iconColor}
-                />
-              </Flex>
-              GPT-4o
-            </Flex>
-            <Flex
-              cursor={'pointer'}
-              transition="0.3s"
-              justify={'center'}
-              align="center"
-              bg={model === 'gpt-3.5-turbo' ? buttonBg : 'transparent'}
-              w="164px"
-              h="70px"
-              boxShadow={model === 'gpt-3.5-turbo' ? buttonShadow : 'none'}
-              borderRadius="14px"
-              color={textColor}
-              fontSize="18px"
-              fontWeight={'700'}
-              onClick={() => setModel('gpt-3.5-turbo')}
-            >
-              <Flex
-                borderRadius="full"
-                justify="center"
-                align="center"
-                bg={bgIcon}
-                me="10px"
-                h="39px"
-                w="39px"
-              >
-                <Icon
-                  as={MdBolt}
-                  width="20px"
-                  height="20px"
-                  color={iconColor}
-                />
-              </Flex>
-              GPT-3.5
-            </Flex>
-          </Flex>
-
-          <Accordion color={gray} allowToggle w="100%" my="0px" mx="auto">
-            <AccordionItem border="none">
-              <AccordionButton
-                borderBottom="0px solid"
-                maxW="max-content"
-                mx="auto"
-                _hover={{ border: '0px solid', bg: 'none' }}
-                _focus={{ border: '0px solid', bg: 'none' }}
-              >
-                <Box flex="1" textAlign="left">
-                  <Text color={gray} fontWeight="500" fontSize="sm">
-                    No plugins added
-                  </Text>
-                </Box>
-                <AccordionIcon color={gray} />
-              </AccordionButton>
-              <AccordionPanel mx="auto" w="max-content" p="0px 0px 10px 0px">
-                <Text
-                  color={gray}
-                  fontWeight="500"
-                  fontSize="sm"
-                  textAlign={'center'}
-                >
-                  This is a cool text example.
-                </Text>
-              </AccordionPanel>
-            </AccordionItem>
-          </Accordion>
-        </Flex>
         {/* Main Box */}
         <Flex
           direction="column"
           w="100%"
           mx="auto"
-          display={outputCode ? 'flex' : 'none'}
-          mb={'auto'}
+          display={hasHistory ? 'flex' : 'none'}
+          mb="8px"
         >
-          <Flex w="100%" align={'center'} mb="10px">
-            <Flex
-              borderRadius="full"
-              justify="center"
-              align="center"
-              bg={'transparent'}
-              border="1px solid"
-              borderColor={borderColor}
-              me="20px"
-              h="40px"
-              minH="40px"
-              minW="40px"
-            >
-              <Icon
-                as={MdPerson}
-                width="20px"
-                height="20px"
-                color={brandColor}
-              />
-            </Flex>
-            <Flex
-              p="22px"
-              border="1px solid"
-              borderColor={borderColor}
-              borderRadius="14px"
-              w="100%"
-              zIndex={'2'}
-            >
-              <Text
-                color={textColor}
-                fontWeight="600"
-                fontSize={{ base: 'sm', md: 'md' }}
-                lineHeight={{ base: '24px', md: '26px' }}
+          <Flex w="100%" direction="column" gap="20px">
+            {history.map((item, idx) => (
+              <Box
+                key={`hist-${idx}`}
+                w="100%"
+                borderRadius="16px"
+                p="6px"
               >
-                {inputOnSubmit}
-              </Text>
-              <Icon
-                cursor="pointer"
-                as={MdEdit}
-                ms="auto"
-                width="20px"
-                height="20px"
-                color={gray}
-              />
-            </Flex>
-          </Flex>
-          <Flex w="100%">
-            <Flex
-              borderRadius="full"
-              justify="center"
-              align="center"
-              bg={'linear-gradient(15.46deg, #4A25E1 26.3%, #7B5AFF 86.4%)'}
-              me="20px"
-              h="40px"
-              minH="40px"
-              minW="40px"
-            >
-              <Icon
-                as={MdAutoAwesome}
-                width="20px"
-                height="20px"
-                color="white"
-              />
-            </Flex>
-            <MessageBoxChat output={outputCode} />
+                {/* Pregunta a la derecha, sin iconos */}
+                <Flex w="100%" justify="flex-end" mb="12px">
+                  <Box
+                    maxW="70%"
+                    p="16px 20px"
+                    borderRadius="14px"
+                    border="1px solid"
+                    borderColor={borderColor}
+                    bg={questionBg}
+                    position="relative"
+                    _after={{
+                      content: "''",
+                      position: 'absolute',
+                      right: '-12px',
+                      top: '18px',
+                      width: '0',
+                      height: '0',
+                      borderTop: '10px solid transparent',
+                      borderBottom: '10px solid transparent',
+                      borderLeft: `12px solid ${bubbleTailColor}`,
+                    }}
+                  >
+                    <Text
+                      color={textColor}
+                      fontWeight="700"
+                      fontSize={{ base: 'sm', md: 'md' }}
+                      lineHeight={{ base: '22px', md: '24px' }}
+                    >
+                      {item.question}
+                    </Text>
+                  </Box>
+                </Flex>
+
+                {/* Respuesta continua */}
+                <Flex w="100%" direction="column" gap="10px">
+                  {Array.isArray(item.formatted?.datos) &&
+                    item.formatted.datos.length > 0 && (
+                      <Box overflowX="auto">
+                        <Table size="sm" variant="simple">
+                          <Thead>
+                            <Tr>
+                              {Object.keys(item.formatted.datos[0] || {}).map((key) => (
+                                <Th key={key} textTransform="capitalize">
+                                  {key}
+                                </Th>
+                              ))}
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {item.formatted.datos.map(
+                              (row: Record<string, any>, rowIdx: number) => (
+                                <Tr key={rowIdx}>
+                                  {Object.keys(item.formatted.datos[0] || {}).map((key) => (
+                                    <Td key={key}>
+                                      {typeof row[key] === 'number'
+                                        ? row[key].toLocaleString('es-MX')
+                                        : String(row[key])}
+                                    </Td>
+                                  ))}
+                                </Tr>
+                              ),
+                            )}
+                          </Tbody>
+                        </Table>
+                      </Box>
+                    )}
+                  {item.formatted?.insight && (
+                    <Box>
+                      <Text fontWeight="700" color={textColor} mb="6px">
+                        Insight
+                      </Text>
+                      <Text color={textColor}>{item.formatted.insight}</Text>
+                    </Box>
+                  )}
+                  {item.formatted?.link_power_bi && (
+                    <Box>
+                      <Text fontWeight="700" color={textColor} mb="6px">
+                        Power BI
+                      </Text>
+                      <Link
+                        href={item.formatted.link_power_bi}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Text color={brandColor} textDecoration="underline">
+                          Ver reporte
+                        </Text>
+                      </Link>
+                    </Box>
+                  )}
+                </Flex>
+              </Box>
+            ))}
           </Flex>
         </Flex>
         {/* Chat Input */}
         <Flex
-          ms={{ base: '0px', xl: '60px' }}
-          mt="20px"
-          justifySelf={'flex-end'}
+          position="fixed"
+          bottom="20px"
+          left="0"
+          right="0"
+          px={{ base: '12px', md: '24px' }}
+          justify="center"
+          zIndex="50"
         >
-          <Input
-            minH="54px"
-            h="100%"
+          <Flex
+            w="100%"
+            maxW="820px"
+            bg="white"
+            borderRadius="45px"
+            boxShadow="0px 18px 30px -12px rgba(15, 76, 155, 0.15)"
             border="1px solid"
             borderColor={borderColor}
-            borderRadius="45px"
-            p="15px 20px"
-            me="10px"
-            fontSize="sm"
-            fontWeight="500"
-            _focus={{ borderColor: 'none' }}
-            color={inputColor}
-            _placeholder={placeholderColor}
-            placeholder="Type your message here..."
-            onChange={handleChange}
-          />
-          <Button
-            variant="primary"
-            py="20px"
-            px="16px"
-            fontSize="sm"
-            borderRadius="45px"
-            ms="auto"
-            w={{ base: '160px', md: '210px' }}
-            h="54px"
-            _hover={{
-              boxShadow:
-                '0px 21px 27px -10px rgba(96, 60, 255, 0.48) !important',
-              bg: 'linear-gradient(15.46deg, #4A25E1 26.3%, #7B5AFF 86.4%) !important',
-              _disabled: {
-                bg: 'linear-gradient(15.46deg, #4A25E1 26.3%, #7B5AFF 86.4%)',
-              },
-            }}
-            onClick={handleTranslate}
-            isLoading={loading ? true : false}
+            align="center"
+            px="10px"
+            py="6px"
+            gap="10px"
           >
-            Submit
-          </Button>
+            <Input
+              flex="1"
+              minH="54px"
+              h="100%"
+              border="none"
+              _focus={{ borderColor: 'none', boxShadow: 'none' }}
+              color={inputColor}
+              _placeholder={placeholderColor}
+              placeholder="Escribe tu mensaje aquí..."
+              onChange={handleChange}
+            />
+            <Button
+              bg={brandColor}
+              color="white"
+              py="16px"
+              px="20px"
+              fontSize="sm"
+              borderRadius="40px"
+              w={{ base: '120px', md: '160px' }}
+              h="50px"
+              _hover={{
+                boxShadow:
+                  '0px 18px 30px -12px rgba(15, 76, 155, 0.45) !important',
+                bg: '#0d3f81 !important',
+                _disabled: {
+                  bg: brandColor,
+                },
+              }}
+              _active={{ bg: '#0b366f' }}
+              onClick={handleTranslate}
+              isLoading={loading ? true : false}
+            >
+              Enviar
+            </Button>
+          </Flex>
         </Flex>
 
-        <Flex
-          justify="center"
-          mt="20px"
-          direction={{ base: 'column', md: 'row' }}
-          alignItems="center"
-        >
-          <Text fontSize="xs" textAlign="center" color={gray}>
-            Free Research Preview. ChatGPT may produce inaccurate information
-            about people, places, or facts.
-          </Text>
-          <Link href="https://help.openai.com/en/articles/6825453-chatgpt-release-notes">
-            <Text
-              fontSize="xs"
-              color={textColor}
-              fontWeight="500"
-              textDecoration="underline"
-            >
-              ChatGPT May 12 Version
-            </Text>
-          </Link>
-        </Flex>
       </Flex>
     </Flex>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,11 +1,30 @@
-  export const runtime = "edge";
+// Use Node.js runtime to allow localhost calls during development.
+export const runtime = "nodejs";
 
+// Prefer explicit env var and fall back to the FastAPI route with /api/chat
 const BACKEND_URL =
-  process.env.DELFOS_BACKEND_URL || "http://127.0.0.1:8000/chat";
+  process.env.DELFOS_BACKEND_URL?.trim() ||
+  "http://127.0.0.1:8000/api/chat";
 
 export async function POST(req: Request): Promise<Response> {
   try {
-    const { inputCode, userId } = await req.json(); // lo que envía el front
+    const raw = await req.text();
+    let inputCode: string | undefined;
+    let userId: string | undefined;
+    try {
+      const body = JSON.parse(raw || "{}"); // lo que envía el front
+      inputCode = body?.inputCode;
+      userId = body?.userId;
+    } catch (parseErr) {
+      return new Response(
+        `Error leyendo el body JSON: ${(parseErr as Error).message}. raw=${raw}`,
+        { status: 400 },
+      );
+    }
+
+    if (!inputCode) {
+      return new Response("Falta inputCode en el body", { status: 400 });
+    }
 
     // Lo que espera el backend FastAPI
     const payload = {
@@ -14,14 +33,14 @@ export async function POST(req: Request): Promise<Response> {
     };
 
     const backendRes = await fetch(BACKEND_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload), // payload debe contener inputCode y userId
-  });
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload), // payload debe contener inputCode y userId
+    });
 
-  const text = await backendRes.text();
+    const text = await backendRes.text();
 
     if (!backendRes.ok) {
       console.error("Error backend Delfos:", text);
@@ -34,7 +53,11 @@ export async function POST(req: Request): Promise<Response> {
     });
   } catch (error: any) {
     console.error("Error llamando al backend Delfos:", error);
-    return new Response("Error llamando al backend Delfos", { status: 500 });
+    const message =
+      error instanceof Error
+        ? `Error llamando al backend Delfos: ${error.message}`
+        : "Error llamando al backend Delfos";
+    return new Response(message, { status: 500 });
   }
 }
 
