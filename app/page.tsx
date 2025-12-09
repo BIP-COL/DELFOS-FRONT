@@ -8,11 +8,12 @@ export default function Chat() {
   // Input States
   const [inputCode, setInputCode] = useState<string>('');
   const [history, setHistory] = useState<
-    Array<{ question: string; formatted: any }>
+    Array<{ question: string; formatted: any; reasoning?: string }>
   >([]);
   const [streamEvents, setStreamEvents] = useState<
     Array<{ step: string; payload: any }>
   >([]);
+  const [expandedReasoning, setExpandedReasoning] = useState<Record<number, boolean>>({});
   // Loading state
   const [loading, setLoading] = useState<boolean>(false);
   // Animated loading text
@@ -108,6 +109,7 @@ export default function Chat() {
       let buffer = '';
       let finalFormatted: any = null;
       const collectedEvents: Array<{ step: string; payload: any }> = [];
+      const reasoningLines: string[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -123,6 +125,15 @@ export default function Chat() {
             const evt = JSON.parse(jsonStr);
             collectedEvents.push({ step: evt.step, payload: evt });
             setStreamEvents([...collectedEvents]);
+            const summary =
+              evt?.result?.summary ||
+              evt?.result?.resumen ||
+              evt?.state?.status ||
+              evt?.result?.message ||
+              '';
+            if (summary) {
+              reasoningLines.push(`${evt.step}: ${summary}`);
+            }
             if (evt.step === 'complete' && evt.result) {
               finalFormatted =
                 evt.result.formatted_response ||
@@ -158,6 +169,7 @@ export default function Chat() {
       setHistory((prev) => {
         const updated = [...prev];
         updated[updated.length - 1].formatted = finalFormatted;
+        updated[updated.length - 1].reasoning = reasoningLines.join('\n');
         return updated;
       });
       setLoading(false);
@@ -280,9 +292,30 @@ export default function Chat() {
                 {/* Respuesta continua */}
                 <Flex w="100%" direction="column" gap="10px">
                   {/* Show loading indicator while waiting for response */}
-                  {item.formatted === null && (
+                  {item.formatted === null && idx === history.length - 1 && streamEvents.length > 0 && (
                     <Box>
-                      <Text color="gray.500" fontStyle="italic">{thinkingWords[thinkingIndex]}{dots}</Text>
+                      <Text fontWeight="700" color={textColor} mb="4px">
+                        Progreso
+                      </Text>
+                      {streamEvents.map((ev, i) => (
+                        <Box key={`${ev.step}-${i}`} mb="2px">
+                          <Text color="gray.600">
+                            {ev.step}:{' '}
+                            {ev.payload?.result?.summary ||
+                              ev.payload?.result?.resumen ||
+                              ev.payload?.state?.status ||
+                              JSON.stringify(ev.payload?.result || ev.payload?.state || ev.payload)}
+                          </Text>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                  {item.formatted === null && streamEvents.length === 0 && (
+                    <Box>
+                      <Text color="gray.500" fontStyle="italic">
+                        {thinkingWords[thinkingIndex]}
+                        {dots}
+                      </Text>
                     </Box>
                   )}
                   {/* Show error message if present */}
@@ -309,6 +342,38 @@ export default function Chat() {
                   {/* Only show data table, insight, and Power BI if no error */}
                   {!item.formatted?.error && (
                     <>
+                      {item.reasoning && item.reasoning.trim() !== '' && (
+                        <Box
+                          border="1px solid"
+                          borderColor={borderColor}
+                          borderRadius="12px"
+                          p="12px"
+                          bg={questionBg}
+                        >
+                          <Flex align="center" justify="space-between" mb="8px">
+                            <Text fontWeight="700" color={textColor}>
+                              Razonamiento del modelo
+                            </Text>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() =>
+                                setExpandedReasoning((prev) => ({
+                                  ...prev,
+                                  [idx]: !prev[idx],
+                                }))
+                              }
+                            >
+                              {expandedReasoning[idx] ? 'Ocultar' : 'Ver razonamiento'}
+                            </Button>
+                          </Flex>
+                          {expandedReasoning[idx] && (
+                            <Text whiteSpace="pre-wrap" color="gray.700">
+                              {item.reasoning}
+                            </Text>
+                          )}
+                        </Box>
+                      )}
                       {Array.isArray(item.formatted?.datos) &&
                         item.formatted.datos.length > 0 && (
                           <Box overflowX="auto">
