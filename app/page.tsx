@@ -10,6 +10,9 @@ export default function Chat() {
   const [history, setHistory] = useState<
     Array<{ question: string; formatted: any }>
   >([]);
+  const [streamEvents, setStreamEvents] = useState<
+    Array<{ step: string; payload: any }>
+  >([]);
   // Loading state
   const [loading, setLoading] = useState<boolean>(false);
   // Animated loading text
@@ -50,11 +53,8 @@ export default function Chat() {
   );
   const hasHistory = history.length > 0;
   const handleTranslate = async () => {
-
-    // Chat post conditions(maximum number of characters, valid message etc.)
     const maxCodeLength = 700;
 
-    
     if (!inputCode) {
       alert('Please enter your message.');
       return;
@@ -67,87 +67,112 @@ export default function Chat() {
       return;
     }
 
-    // Save the message and clear input immediately
     const currentMessage = inputCode;
     setHistory((prev) => [...prev, { question: currentMessage, formatted: null }]);
     setInputCode('');
+    setStreamEvents([]);
     setLoading(true);
 
     const controller = new AbortController();
-    const body: ChatBody = {
-      inputCode: currentMessage
-    };
+    const streamUrl =
+      process.env.NEXT_PUBLIC_BACKEND_STREAM_URL?.trim() ||
+      'http://127.0.0.1:8000/api/chat/stream';
 
-    // -------------- Fetch --------------
-    const response = await fetch('./api/chatAPI', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        inputCode: body.inputCode,   // este es el mensaje del usuario
-      }),
-    });
-
-    const rawText = await response.text();
-
-    if (!response.ok) {
-      setLoading(false);
-      // Update last history item with error
-      setHistory((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1].formatted = { error: rawText || 'Something went wrong fetching from the API.' };
-        return updated;
-      });
-      return;
-    }
-
-    let data: any;
     try {
-      data = rawText ? JSON.parse(rawText) : {};
-      console.log("Frontend received data:", data);
-    } catch (err) {
-      setLoading(false);
-      setHistory((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1].formatted = { error: `Respuesta no es JSON: ${rawText}` };
-        return updated;
+      const payload = {
+        message: currentMessage,
+        user_id: 'anonymous',
+      };
+      const response = await fetch(streamUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify(payload),
       });
-      return;
-    }
 
-    // Prefer top-level formatted_response; fallback to FormatAgent parsed_response;
-    // finally accept root-level data with 'datos' or 'insight' fields
-    let formatted = data?.formatted_response;
-    if (!formatted && Array.isArray(data?.agent_outputs)) {
-      formatted = data.agent_outputs.find(
-        (item: any) =>
-          item?.agent_name?.toLowerCase() === 'formatagent' &&
-          item?.parsed_response,
-      )?.parsed_response;
-    }
-    // Fallback: if data has 'datos', 'insight', 'error', or 'patron' at root level, use data directly
-    if (!formatted && (data?.datos || data?.insight || data?.error || data?.patron)) {
-      formatted = data;
-    }
-    if (!formatted) {
+      if (!response.ok || !response.body) {
+        const rawText = await response.text();
+        setHistory((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1].formatted = { error: rawText || 'No se pudo abrir el stream.' };
+          return updated;
+        });
+        setLoading(false);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalFormatted: any = null;
+      const collectedEvents: Array<{ step: string; payload: any }> = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data:')) continue;
+          const jsonStr = line.replace(/^data:\s*/, '');
+          try {
+            const evt = JSON.parse(jsonStr);
+            collectedEvents.push({ step: evt.step, payload: evt });
+            setStreamEvents([...collectedEvents]);
+            if (evt.step === 'complete' && evt.result) {
+              finalFormatted =
+                evt.result.formatted_response ||
+                evt.result ||
+                evt.payload ||
+                null;
+            }
+          } catch (_err) {
+            // ignore parse errors
+          }
+        }
+      }
+
+      if (!finalFormatted && collectedEvents.length > 0) {
+        const last = collectedEvents[collectedEvents.length - 1].payload;
+        finalFormatted =
+          last?.result?.formatted_response ||
+          last?.result ||
+          last?.payload ||
+          null;
+      }
+
+      if (!finalFormatted) {
+        setHistory((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1].formatted = { error: 'El stream no devolvió respuesta final.' };
+          return updated;
+        });
+        setLoading(false);
+        return;
+      }
+
       setHistory((prev) => {
         const updated = [...prev];
-        updated[updated.length - 1].formatted = { error: 'No se encontró formatted_response en la respuesta.' };
+        updated[updated.length - 1].formatted = finalFormatted;
         return updated;
       });
       setLoading(false);
-      return;
+    } catch (error) {
+      setHistory((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].formatted = {
+          error: error instanceof Error ? error.message : 'Error procesando el stream',
+        };
+        return updated;
+      });
+      setLoading(false);
     }
-    // Update last history item with the response
-    setHistory((prev) => {
-      const updated = [...prev];
-      updated[updated.length - 1].formatted = formatted;
-      return updated;
-    });
-    setLoading(false);
   };
+
   // -------------- Copy Response --------------
   // const copyToClipboard = (text: string) => {
   //   const el = document.createElement('textarea');
@@ -431,6 +456,8 @@ export default function Chat() {
     </Flex>
   );
 }
+
+
 
 
 
