@@ -77,8 +77,8 @@ export default function AdminNavbar(props: {
     >
       <Flex
         w="100%"
-        maxW="1200px"
-        mx="auto"
+        maxW="100%"
+        mx="0"
         alignItems="center"
         justifyContent="space-between"
       >
