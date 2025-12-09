@@ -41,6 +41,7 @@ export async function POST(req: Request): Promise<Response> {
     });
 
     const text = await backendRes.text();
+    console.log("Backend response:", text);
 
     if (!backendRes.ok) {
       console.error("Error backend Delfos:", text);

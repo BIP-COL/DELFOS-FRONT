@@ -1,7 +1,6 @@
 ﻿'use client';
 /*eslint-disable*/
 
-import Link from '@/components/link/Link';
 import { ChatBody } from '@/types/types';
 import { Box, Button, Flex, Input, Text, useColorModeValue, Table, Thead, Tbody, Tr, Th, Td } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
@@ -13,6 +12,29 @@ export default function Chat() {
   >([]);
   // Loading state
   const [loading, setLoading] = useState<boolean>(false);
+  // Animated loading text
+  const thinkingWords = ['Pensando', 'Analizando', 'Consultando', 'Procesando'];
+  const [thinkingIndex, setThinkingIndex] = useState<number>(0);
+  const [dots, setDots] = useState<string>('');
+
+  useEffect(() => {
+    if (!loading) {
+      setThinkingIndex(0);
+      setDots('');
+      return;
+    }
+    const interval = setInterval(() => {
+      setDots((prev) => {
+        if (prev.length >= 3) {
+          // Change word when dots reset
+          setThinkingIndex((idx) => (idx + 1) % thinkingWords.length);
+          return '';
+        }
+        return prev + '.';
+      });
+    }, 400);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   // API Key
   // const [apiKey, setApiKey] = useState<string>(apiKeyApp);
@@ -44,10 +66,16 @@ export default function Chat() {
       );
       return;
     }
+
+    // Save the message and clear input immediately
+    const currentMessage = inputCode;
+    setHistory((prev) => [...prev, { question: currentMessage, formatted: null }]);
+    setInputCode('');
     setLoading(true);
+
     const controller = new AbortController();
     const body: ChatBody = {
-      inputCode
+      inputCode: currentMessage
     };
 
     // -------------- Fetch --------------
@@ -66,20 +94,31 @@ export default function Chat() {
 
     if (!response.ok) {
       setLoading(false);
-      alert(rawText || 'Something went wrong fetching from the API.');
+      // Update last history item with error
+      setHistory((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].formatted = { error: rawText || 'Something went wrong fetching from the API.' };
+        return updated;
+      });
       return;
     }
 
     let data: any;
     try {
       data = rawText ? JSON.parse(rawText) : {};
+      console.log("Frontend received data:", data);
     } catch (err) {
       setLoading(false);
-      alert(`Respuesta no es JSON: ${rawText}`);
+      setHistory((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].formatted = { error: `Respuesta no es JSON: ${rawText}` };
+        return updated;
+      });
       return;
     }
 
-    // Prefer top-level formatted_response; fallback to FormatAgent parsed_response
+    // Prefer top-level formatted_response; fallback to FormatAgent parsed_response;
+    // finally accept root-level data with 'datos' or 'insight' fields
     let formatted = data?.formatted_response;
     if (!formatted && Array.isArray(data?.agent_outputs)) {
       formatted = data.agent_outputs.find(
@@ -88,12 +127,25 @@ export default function Chat() {
           item?.parsed_response,
       )?.parsed_response;
     }
+    // Fallback: if data has 'datos', 'insight', 'error', or 'patron' at root level, use data directly
+    if (!formatted && (data?.datos || data?.insight || data?.error || data?.patron)) {
+      formatted = data;
+    }
     if (!formatted) {
-      alert('No se encontró formatted_response en la respuesta.');
+      setHistory((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].formatted = { error: 'No se encontró formatted_response en la respuesta.' };
+        return updated;
+      });
       setLoading(false);
       return;
     }
-    setHistory((prev) => [...prev, { question: inputCode, formatted }]);
+    // Update last history item with the response
+    setHistory((prev) => {
+      const updated = [...prev];
+      updated[updated.length - 1].formatted = formatted;
+      return updated;
+    });
     setLoading(false);
   };
   // -------------- Copy Response --------------
@@ -140,27 +192,24 @@ export default function Chat() {
       direction="column"
       overflow="hidden"
     >
+      {/* Main scrollable area - full width for scrollbar at edge */}
       <Flex
         direction="column"
         flex="1"
-        mx="auto"
-        w={{ base: '100%', md: '100%', xl: '100%' }}
-        maxW="820px"
-        pb="0"
+        w="100%"
         minH="0"
+        overflowY="auto"
+        overflowX="hidden"
+        display={hasHistory ? 'flex' : 'none'}
+        pb={{ base: '80px', md: '64px' }}
       >
-        {/* Main Box */}
+        {/* Content container - centered with max width */}
         <Flex
           direction="column"
           w="100%"
+          maxW="820px"
           mx="auto"
-          display={hasHistory ? 'flex' : 'none'}
           mb="8px"
-          flex="1"
-          minH="0"
-          overflowY="auto"
-          overflowX="hidden"
-          pb={{ base: '80px', md: '64px' }}
         >
           <Flex w="100%" direction="column" gap="20px">
             {history.map((item, idx) => (
@@ -205,66 +254,114 @@ export default function Chat() {
 
                 {/* Respuesta continua */}
                 <Flex w="100%" direction="column" gap="10px">
-                  {Array.isArray(item.formatted?.datos) &&
-                    item.formatted.datos.length > 0 && (
-                      <Box overflowX="auto">
-                        <Table size="sm" variant="simple">
-                          <Thead>
-                            <Tr>
-                              {Object.keys(item.formatted.datos[0] || {}).map((key) => (
-                                <Th key={key} textTransform="capitalize">
-                                  {key}
-                                </Th>
-                              ))}
-                            </Tr>
-                          </Thead>
-                          <Tbody>
-                            {item.formatted.datos.map(
-                              (row: Record<string, any>, rowIdx: number) => (
-                                <Tr key={rowIdx}>
-                                  {Object.keys(item.formatted.datos[0] || {}).map((key) => (
-                                    <Td key={key}>
-                                      {typeof row[key] === 'number'
-                                        ? row[key].toLocaleString('es-MX')
-                                        : String(row[key])}
-                                    </Td>
-                                  ))}
-                                </Tr>
-                              ),
-                            )}
-                          </Tbody>
-                        </Table>
-                      </Box>
-                    )}
-                  {item.formatted?.insight && (
+                  {/* Show loading indicator while waiting for response */}
+                  {item.formatted === null && (
                     <Box>
-                      <Text fontWeight="700" color={textColor} mb="6px">
-                        Insight
-                      </Text>
-                      <Text color={textColor}>{item.formatted.insight}</Text>
+                      <Text color="gray.500" fontStyle="italic">{thinkingWords[thinkingIndex]}{dots}</Text>
                     </Box>
                   )}
-                  {item.formatted?.link_power_bi && (
-                    <Box>
-                      <Text fontWeight="700" color={textColor} mb="6px">
-                        Power BI
-                      </Text>
-                      <Link
-                        href={item.formatted.link_power_bi}
-                        target="_blank"
-                        rel="noreferrer"
+                  {/* Show error message if present */}
+                  {item.formatted?.error && (
+                    <>
+                      {/* Show patron and arquetipo info before error, only if not both NA */}
+                      {!(item.formatted?.patron === 'NA' && item.formatted?.arquetipo === 'NA') && (
+                        <Box>
+                          <Text color={textColor}>
+                            El patrón identificado es: {item.formatted?.patron || 'N/A'} y la pregunta es de arquetipo {item.formatted?.arquetipo || 'N/A'}
+                          </Text>
+                        </Box>
+                      )}
+                      <Box
+                        py="4px"
+                        px="12px"
+                        borderLeft="4px solid"
+                        borderColor="red.400"
                       >
-                        <Text color={brandColor} textDecoration="underline">
-                          Ver reporte
-                        </Text>
-                      </Link>
-                    </Box>
+                        <Text color="red.700">{item.formatted.error}</Text>
+                      </Box>
+                    </>
+                  )}
+                  {/* Only show data table, insight, and Power BI if no error */}
+                  {!item.formatted?.error && (
+                    <>
+                      {Array.isArray(item.formatted?.datos) &&
+                        item.formatted.datos.length > 0 && (
+                          <Box overflowX="auto">
+                            <Table size="sm" variant="simple">
+                              <Thead>
+                                <Tr>
+                                  {Object.keys(item.formatted.datos[0] || {}).map((key) => (
+                                    <Th key={key} textTransform="capitalize">
+                                      {key}
+                                    </Th>
+                                  ))}
+                                </Tr>
+                              </Thead>
+                              <Tbody>
+                                {item.formatted.datos.map(
+                                  (row: Record<string, any>, rowIdx: number) => (
+                                    <Tr key={rowIdx}>
+                                      {Object.keys(item.formatted.datos[0] || {}).map((key) => (
+                                        <Td key={key}>
+                                          {typeof row[key] === 'number'
+                                            ? row[key].toLocaleString('es-MX')
+                                            : String(row[key])}
+                                        </Td>
+                                      ))}
+                                    </Tr>
+                                  ),
+                                )}
+                              </Tbody>
+                            </Table>
+                          </Box>
+                        )}
+                      {item.formatted?.insight && (
+                        <Box>
+                          <Text fontWeight="700" color={textColor} mb="6px">
+                            Insight
+                          </Text>
+                          <Text color={textColor}>{item.formatted.insight}</Text>
+                        </Box>
+                      )}
+                      {item.formatted?.html_url && (
+                        <Box>
+                          <Text fontWeight="700" color={textColor} mb="6px">
+                            Gráfica
+                          </Text>
+                          <Box
+                            as="iframe"
+                            src={item.formatted.html_url}
+                            width="100%"
+                            height="400px"
+                            border="none"
+                            borderRadius="8px"
+                          />
+                        </Box>
+                      )}
+                      {item.formatted?.link_power_bi && (
+                        <Box>
+                          <Text fontWeight="700" color={textColor} mb="6px">
+                            Power BI
+                          </Text>
+                          <a
+                            href={item.formatted.link_power_bi}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <Text color={brandColor} textDecoration="underline">
+                              Ver reporte
+                            </Text>
+                          </a>
+                        </Box>
+                      )}
+                    </>
                   )}
                 </Flex>
               </Box>
             ))}
           </Flex>
         </Flex>
+      </Flex>
       {/* Chat Input */}
       <Flex
         position="fixed"
@@ -296,8 +393,14 @@ export default function Chat() {
               _focus={{ borderColor: 'none', boxShadow: 'none' }}
               color={inputColor}
               _placeholder={placeholderColor}
-              placeholder="Escribe tu mensaje aquí..."
+              placeholder="Pregunta a Delfos"
+              value={inputCode}
               onChange={handleChange}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !loading) {
+                  handleTranslate();
+                }
+              }}
             />
             <Button
               bg={brandColor}
@@ -325,7 +428,6 @@ export default function Chat() {
           </Flex>
         </Flex>
 
-      </Flex>
     </Flex>
   );
 }
