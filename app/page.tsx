@@ -2,7 +2,7 @@
 /*eslint-disable*/
 
 import { ChatBody } from '@/types/types';
-import { Box, Button, Flex, Input, Text, useColorModeValue, Table, Thead, Tbody, Tr, Th, Td } from '@chakra-ui/react';
+import { Box, Button, Flex, Input, Text, useColorModeValue, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
 export default function Chat() {
   // Input States
@@ -69,7 +69,7 @@ export default function Chat() {
     }
 
     const currentMessage = inputCode;
-    setHistory((prev) => [...prev, { question: currentMessage, formatted: null }]);
+    setHistory((prev) => [...prev, { question: currentMessage, formatted: null, reasoning: '' }]);
     setInputCode('');
     setStreamEvents([]);
     setLoading(true);
@@ -124,7 +124,7 @@ export default function Chat() {
           try {
             const evt = JSON.parse(jsonStr);
             collectedEvents.push({ step: evt.step, payload: evt });
-            setStreamEvents([...collectedEvents]);
+            setStreamEvents((prev) => [...collectedEvents]);
             const summary =
               evt?.result?.summary ||
               evt?.result?.resumen ||
@@ -134,11 +134,14 @@ export default function Chat() {
             if (summary) {
               reasoningLines.push(`${evt.step}: ${summary}`);
             }
-            if (evt.step === 'complete' && evt.result) {
+            if (evt.step === 'complete') {
               finalFormatted =
-                evt.result.formatted_response ||
-                evt.result ||
-                evt.payload ||
+                evt?.result?.formatted_response ||
+                evt?.result?.formattedResponse ||
+                evt?.result ||
+                evt?.payload ||
+                evt?.response ||
+                evt?.message ||
                 null;
             }
           } catch (_err) {
@@ -151,8 +154,11 @@ export default function Chat() {
         const last = collectedEvents[collectedEvents.length - 1].payload;
         finalFormatted =
           last?.result?.formatted_response ||
+          last?.result?.formattedResponse ||
           last?.result ||
           last?.payload ||
+          last?.response ||
+          last?.message ||
           null;
       }
 
@@ -293,21 +299,43 @@ export default function Chat() {
                 <Flex w="100%" direction="column" gap="10px">
                   {/* Show loading indicator while waiting for response */}
                   {item.formatted === null && idx === history.length - 1 && streamEvents.length > 0 && (
-                    <Box>
-                      <Text fontWeight="700" color={textColor} mb="4px">
+                    <Box border="1px solid" borderColor={borderColor} borderRadius="12px" p="12px" bg={questionBg}>
+                      <Text fontWeight="700" color={textColor} mb="8px">
                         Progreso
                       </Text>
-                      {streamEvents.map((ev, i) => (
-                        <Box key={`${ev.step}-${i}`} mb="2px">
-                          <Text color="gray.600">
-                            {ev.step}:{' '}
-                            {ev.payload?.result?.summary ||
-                              ev.payload?.result?.resumen ||
-                              ev.payload?.state?.status ||
-                              JSON.stringify(ev.payload?.result || ev.payload?.state || ev.payload)}
-                          </Text>
-                        </Box>
-                      ))}
+                      {(() => {
+                        const totalSteps = ['triage','intent','schema','sql_generation','sql_execution','verification','visualization','graph','format','complete'];
+                        const uniqueSteps = Array.from(new Set(streamEvents.map((e) => e.step))).filter((s) => !!s);
+                        const completed = uniqueSteps.filter((s) => totalSteps.includes(s)).length;
+                        const progressValue = Math.min(100, Math.round((completed / totalSteps.length) * 100));
+                        return (
+                          <>
+                            <Progress value={progressValue} size="sm" mb="10px" />
+                            <Flex direction="column" gap="6px">
+                              {streamEvents.map((ev, i) => {
+                                const summary =
+                                  ev.payload?.result?.summary ||
+                                  ev.payload?.result?.resumen ||
+                                  ev.payload?.result?.razon ||
+                                  ev.payload?.state?.status ||
+                                  ev.payload?.result?.message ||
+                                  '';
+                                const detail = summary || JSON.stringify(ev.payload?.result || ev.payload?.state || ev.payload, null, 2);
+                                return (
+                                  <Box key={`${ev.step}-${i}`} p="8px" borderRadius="10px" bg="white" border="1px solid" borderColor={borderColor}>
+                                    <Text fontWeight="700" color={textColor} mb="4px" textTransform="capitalize">
+                                      {ev.step}
+                                    </Text>
+                                    <Text color="gray.700" whiteSpace="pre-wrap">
+                                      {detail}
+                                    </Text>
+                                  </Box>
+                                );
+                              })}
+                            </Flex>
+                          </>
+                        );
+                      })()}
                     </Box>
                   )}
                   {item.formatted === null && streamEvents.length === 0 && (
@@ -521,6 +549,8 @@ export default function Chat() {
     </Flex>
   );
 }
+
+
 
 
 
