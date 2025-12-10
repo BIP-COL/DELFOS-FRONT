@@ -165,7 +165,7 @@ export default function Chat() {
       if (!finalFormatted) {
         setHistory((prev) => {
           const updated = [...prev];
-          updated[updated.length - 1].formatted = { error: 'El stream no devolvió respuesta final.' };
+          updated[updated.length - 1].formatted = { error: 'El stream no devolvi� respuesta final.' };
           return updated;
         });
         setLoading(false);
@@ -304,34 +304,158 @@ export default function Chat() {
                         Progreso
                       </Text>
                       {(() => {
-                        const totalSteps = ['triage','intent','schema','sql_generation','sql_execution','verification','visualization','graph','format','complete'];
+                        const totalSteps = ['triage', 'intent', 'schema', 'sql_generation', 'verification', 'sql_execution', 'visualization', 'graph', 'format', 'complete'];
                         const uniqueSteps = Array.from(new Set(streamEvents.map((e) => e.step))).filter((s) => !!s);
                         const completed = uniqueSteps.filter((s) => totalSteps.includes(s)).length;
                         const progressValue = Math.min(100, Math.round((completed / totalSteps.length) * 100));
+
+                        const pickString = (...values: any[]) =>
+                          values.find((v) => typeof v === 'string' && v.trim().length > 0)?.trim();
+
+                        const asList = (value: any) => (Array.isArray(value) ? value : null);
+
+                        const buildTitle = (identifier: string, index: number) => {
+                          const id = identifier.toLowerCase();
+                          const base = 'Paso ' + (index + 1) + ' - ';
+                          if (id.includes('triage')) return base + 'Clasificacion de la consulta';
+                          if (id.includes('intent')) return base + 'Clasificacion del patron analitico';
+                          if (id.includes('schema')) return base + 'Priorizacion de tablas';
+                          if (id.includes('sql_generation')) return base + 'Generacion de SQL';
+                          if (id.includes('verification')) return base + 'Verificacion de la consulta';
+                          if (id.includes('sql_execution')) return base + 'Ejecucion de la consulta';
+                          if (id.includes('viz') || id.includes('visualization')) return base + 'Generacion de la visualizacion';
+                          return base + 'Paso adicional del agente';
+                        };
+
+                        const buildBody = (identifier: string, payload: any) => {
+                          const id = identifier.toLowerCase();
+                          const successValues = ['ok', 'success', 'completed', 'done'];
+                          const isSuccess = (val: any) =>
+                            val === true || successValues.includes(String(val).toLowerCase());
+                          const errorMsg =
+                            pickString(
+                              payload?.error,
+                              payload?.message,
+                              payload?.descripcion,
+                              payload?.detail,
+                              payload?.reason,
+                              payload?.resumen,
+                            ) || '';
+
+                          if (id.includes('triage')) {
+                            const classification =
+                              pickString(payload?.category, payload?.categoria, payload?.domain, payload?.area) || '';
+                            const reasoning =
+                              pickString(payload?.reasoning, payload?.resumen, payload?.summary, payload?.detalle) || '';
+                            if (classification && reasoning) {
+                              return `La consulta se ha clasificado como ${classification}. Detalle del modelo: ${reasoning}`;
+                            }
+                            if (classification) return `La consulta se ha clasificado como ${classification}.`;
+                            if (reasoning) return `La consulta se ha clasificado. Detalle del modelo: ${reasoning}`;
+                            return 'La consulta se ha clasificado.';
+                          }
+
+                          if (id.includes('intent')) {
+                            const intent = pickString(payload?.intent, payload?.intention, payload?.objetivo);
+                            const tipoPatron = pickString(payload?.tipo_patron, payload?.patron, payload?.pattern, payload?.tipo);
+                            const arquetipo = pickString(payload?.arquetipo, payload?.archetype);
+                            const razon = pickString(payload?.razon, payload?.reasoning, payload?.resumen, payload?.detalle);
+                            const parts: string[] = [];
+                            if (intent) parts.push(`intencion '${intent}'`);
+                            if (tipoPatron) parts.push(`un patron de ${tipoPatron}`);
+                            if (arquetipo) parts.push(`arquetipo ${arquetipo}`);
+                            const main =
+                              parts.length > 0
+                                ? `Se identifico que la consulta tiene ${parts.join(' y ')}.`
+                                : 'Se identifico la intencion de la consulta.';
+                            return razon ? `${main} ${razon}`.trim() : main;
+                          }
+
+                          if (id.includes('schema')) {
+                            const tables =
+                              asList(payload?.tablas_priorizadas) ||
+                              asList(payload?.tablas) ||
+                              asList(payload?.tables) ||
+                              asList(payload?.prioritized_tables) ||
+                              asList(payload?.tablas_prioritizadas);
+                            if (tables && tables.length > 0) {
+                              return `Las tablas priorizadas son: ${tables.join(', ')}.`;
+                            }
+                            return 'Se han identificado y priorizado las tablas relevantes para la consulta.';
+                          }
+
+                          if (id.includes('sql_generation')) {
+                            const sql =
+                              pickString(
+                                payload?.sql,
+                                payload?.query,
+                                payload?.consulta,
+                                payload?.generated_sql,
+                                payload?.sql_query,
+                              ) || '';
+                            if (sql) return `La consulta SQL generada es: ${sql}`;
+                            return 'El agente genero la consulta SQL para responder a la pregunta.';
+                          }
+
+                          if (id.includes('verification')) {
+                            if (isSuccess(payload?.success) || isSuccess(payload?.ok) || isSuccess(payload?.status)) {
+                              return 'La consulta fue verificada correctamente.';
+                            }
+                            if (errorMsg) {
+                              return `Durante la verificacion se encontraron problemas: ${errorMsg}`;
+                            }
+                            return 'Se ha verificado la consistencia de la consulta generada.';
+                          }
+
+                          if (id.includes('sql_execution')) {
+                            if (isSuccess(payload?.success) || isSuccess(payload?.ok) || isSuccess(payload?.status)) {
+                              return 'La ejecucion de la consulta fue exitosa.';
+                            }
+                            if (errorMsg) {
+                              return `La ejecucion de la consulta presento un error: ${errorMsg}`;
+                            }
+                            return 'La consulta se ejecuto sobre la base de datos.';
+                          }
+
+                          if (id.includes('viz') || id.includes('visualization')) {
+                            const tipoGrafico =
+                              pickString(
+                                payload?.tipo_grafico,
+                                payload?.chart_type,
+                                payload?.visual_hint,
+                                payload?.graph_type,
+                                payload?.viz_type,
+                              ) || '';
+                            if (tipoGrafico) return `Se genero la visualizacion de tipo ${tipoGrafico}.`;
+                            return 'Se genero la visualizacion de los resultados de la consulta.';
+                          }
+
+                          return 'El agente reporta informacion adicional.';
+                        };
+
+                        const renderStep = (ev: { step: string; payload: any }, idxStep: number) => {
+                          const rawPayload = ev.payload || {};
+                          const payload = rawPayload.result || rawPayload.payload || rawPayload;
+                          const identifier =
+                            `${ev.step || ''} ${rawPayload?.type || ''} ${rawPayload?.name || ''}`.trim() || 'paso';
+
+                          return (
+                            <Box key={`${ev.step}-${idxStep}`} p="10px" borderRadius="10px" bg="white" border="1px solid" borderColor={borderColor} w="100%">
+                              <Text fontWeight="700" color={textColor} mb="4px">
+                                {buildTitle(identifier, idxStep)}
+                              </Text>
+                              <Text color="gray.700" whiteSpace="pre-wrap">
+                                {buildBody(identifier, payload)}
+                              </Text>
+                            </Box>
+                          );
+                        };
+
                         return (
                           <>
-                            <Progress value={progressValue} size="sm" mb="10px" />
-                            <Flex direction="column" gap="6px">
-                              {streamEvents.map((ev, i) => {
-                                const summary =
-                                  ev.payload?.result?.summary ||
-                                  ev.payload?.result?.resumen ||
-                                  ev.payload?.result?.razon ||
-                                  ev.payload?.state?.status ||
-                                  ev.payload?.result?.message ||
-                                  '';
-                                const detail = summary || JSON.stringify(ev.payload?.result || ev.payload?.state || ev.payload, null, 2);
-                                return (
-                                  <Box key={`${ev.step}-${i}`} p="8px" borderRadius="10px" bg="white" border="1px solid" borderColor={borderColor}>
-                                    <Text fontWeight="700" color={textColor} mb="4px" textTransform="capitalize">
-                                      {ev.step}
-                                    </Text>
-                                    <Text color="gray.700" whiteSpace="pre-wrap">
-                                      {detail}
-                                    </Text>
-                                  </Box>
-                                );
-                              })}
+                            <Progress value={progressValue} size="sm" mb="10px" w="100%" />
+                            <Flex direction="column" gap="8px" w="100%">
+                              {streamEvents.map((ev, i) => renderStep(ev, i))}
                             </Flex>
                           </>
                         );
@@ -353,7 +477,7 @@ export default function Chat() {
                       {!(item.formatted?.patron === 'NA' && item.formatted?.arquetipo === 'NA') && (
                         <Box>
                           <Text color={textColor}>
-                            El patrón identificado es: {item.formatted?.patron || 'N/A'} y la pregunta es de arquetipo {item.formatted?.arquetipo || 'N/A'}
+                            El patr�n identificado es: {item.formatted?.patron || 'N/A'} y la pregunta es de arquetipo {item.formatted?.arquetipo || 'N/A'}
                           </Text>
                         </Box>
                       )}
@@ -444,7 +568,7 @@ export default function Chat() {
                       {item.formatted?.html_url && (
                         <Box>
                           <Text fontWeight="700" color={textColor} mb="6px">
-                            Gráfica
+                            Gr�fica
                           </Text>
                           <Box
                             as="iframe"
@@ -549,6 +673,8 @@ export default function Chat() {
     </Flex>
   );
 }
+
+
 
 
 
