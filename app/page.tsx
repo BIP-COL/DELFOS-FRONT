@@ -4,14 +4,215 @@
 import { ChatBody } from '@/types/types';
 import { Box, Button, Flex, Input, Text, useColorModeValue, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
+
+type StreamEvent = { step: string; payload: any };
+
+const buildModelReasoning = (events: StreamEvent[]): string[] => {
+  if (!Array.isArray(events) || events.length === 0) return [];
+
+  const pickString = (...values: any[]) =>
+    values.find((v) => typeof v === 'string' && v.trim().length > 0)?.trim();
+
+  const pickNumber = (...values: any[]): number | null => {
+    for (const val of values) {
+      if (typeof val === 'number' && !Number.isNaN(val)) return val;
+      if (typeof val === 'string' && val.trim() !== '' && !Number.isNaN(Number(val))) {
+        return Number(val);
+      }
+    }
+    return null;
+  };
+
+  const asList = (value: any) => (Array.isArray(value) ? value : null);
+
+  const successValues = ['ok', 'success', 'completed', 'done', 'true'];
+  const isSuccess = (val: any) =>
+    val === true || successValues.includes(String(val).toLowerCase());
+  const hasSuccessText = (text?: string | null) => {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.toLowerCase();
+    return t.includes('exito') || t.includes('éxito') || t.includes('success') || t.includes('ok');
+  };
+
+  const lines: string[] = [];
+
+  events.forEach((ev) => {
+    if (!ev) return;
+    const rawPayload = ev.payload || {};
+    const payload = rawPayload.result || rawPayload.payload || rawPayload;
+    const identifier = `${ev.step || ''} ${rawPayload?.type || ''} ${rawPayload?.name || ''}`
+      .toLowerCase()
+      .trim();
+    const addLine = (text?: string) => {
+      if (text && text.trim().length > 0) {
+        lines.push(text.trim());
+      }
+    };
+
+    if (identifier.includes('triage')) {
+      const classification =
+        pickString(payload?.query_type, payload?.category, payload?.categoria, payload?.domain, payload?.area) || '';
+      const reasoning =
+        pickString(payload?.reasoning, payload?.resumen, payload?.summary, payload?.detalle) || '';
+      let line = classification
+        ? `Se clasificó la consulta como ${classification}.`
+        : 'Se clasificó la consulta.';
+      if (reasoning) {
+        line += ` Detalle: ${reasoning}`;
+      }
+      addLine(line);
+      return;
+    }
+
+    if (identifier.includes('intent')) {
+      const intent = pickString(payload?.intent, payload?.intention, payload?.objetivo);
+      const tipoPatron = pickString(payload?.tipo_patron, payload?.patron, payload?.pattern, payload?.tipo);
+      const arquetipo = pickString(payload?.arquetipo, payload?.archetype);
+      const razon = pickString(payload?.razon, payload?.reasoning, payload?.resumen, payload?.detalle);
+      let line = 'Se identificó la intención de la consulta.';
+      if (tipoPatron || arquetipo || intent) {
+        line = 'Se identificó que el patrón analítico es';
+        if (tipoPatron) line += ` de ${tipoPatron}`;
+        if (arquetipo) line += ` (arquetipo ${arquetipo})`;
+        if (intent) line += ` con intención '${intent}'`;
+        line += '.';
+      }
+      if (razon) {
+        line += ` Justificación del modelo: ${razon}`;
+      }
+      addLine(line);
+      return;
+    }
+
+    if (identifier.includes('schema')) {
+      const tables =
+        asList(payload?.tablas_priorizadas) ||
+        asList(payload?.tablas) ||
+        asList(payload?.tables) ||
+        asList(payload?.prioritized_tables) ||
+        asList(payload?.tablas_prioritizadas);
+      if (tables && tables.length > 0) {
+        addLine(`Se priorizaron las siguientes tablas para construir la respuesta: ${tables.join(', ')}.`);
+      } else {
+        addLine('Se priorizaron las tablas relevantes para construir la respuesta.');
+      }
+      return;
+    }
+
+    if (identifier.includes('sql_generation')) {
+      const sql =
+        pickString(
+          payload?.sql,
+          payload?.query,
+          payload?.consulta,
+          payload?.generated_sql,
+          payload?.sql_query,
+        ) || '';
+      if (sql) {
+        addLine(`Se generó la siguiente consulta SQL para responder la pregunta: ${sql}`);
+      } else {
+        addLine('Se generó la consulta SQL para responder la pregunta.');
+      }
+      return;
+    }
+
+    if (identifier.includes('verification')) {
+      const verificationMsg =
+        pickString(payload?.message, payload?.detalle, payload?.descripcion, payload?.reason, payload?.resumen) || '';
+      if (isSuccess(payload?.success) || isSuccess(payload?.ok) || isSuccess(payload?.status)) {
+        addLine('La consulta fue verificada correctamente.');
+      } else if (verificationMsg) {
+        addLine(`Durante la verificación se encontraron los siguientes puntos: ${verificationMsg}`);
+      } else {
+        addLine('Se realizó una verificación de la consulta.');
+      }
+      return;
+    }
+
+    if (identifier.includes('sql_execution')) {
+      const totalFilas = pickNumber(
+        payload?.total_filas,
+        payload?.total_rows,
+        payload?.row_count,
+        payload?.count,
+        payload?.num_rows,
+      );
+      const execMsg =
+        pickString(payload?.error, payload?.errorMessage, payload?.descripcion, payload?.detalle, payload?.reason) || '';
+      const successText = pickString(
+        payload?.message,
+        payload?.resumen,
+        payload?.summary,
+        payload?.status,
+        payload?.state?.status,
+      );
+      const successFlag =
+        isSuccess(payload?.success) ||
+        isSuccess(payload?.ok) ||
+        isSuccess(payload?.status) ||
+        hasSuccessText(successText);
+
+      if (successFlag) {
+        let line = 'La ejecución de la consulta fue exitosa.';
+        if (totalFilas !== null) {
+          line += ` Se devolvieron ${totalFilas} filas.`;
+        }
+        addLine(line);
+      } else if (execMsg) {
+        addLine(`La ejecución de la consulta presentó un error: ${execMsg}.`);
+      } else {
+        addLine('La ejecución de la consulta se completó, pero no se dispone de más detalle.');
+      }
+      return;
+    }
+
+    if (identifier.includes('viz') || identifier.includes('visualization') || identifier.includes('graph')) {
+      const tipoGrafico =
+        pickString(
+          payload?.tipo_grafico,
+          payload?.chart_type,
+          payload?.visual_hint,
+          payload?.graph_type,
+          payload?.viz_type,
+        ) || '';
+      if (tipoGrafico) {
+        addLine(`Se generó una visualización de tipo ${tipoGrafico} para representar los resultados.`);
+      } else {
+        addLine('Se generó una visualización para representar los resultados.');
+      }
+      return;
+    }
+
+    addLine('El agente realizó un paso adicional de procesamiento.');
+  });
+
+  return lines;
+};
+
+const isWorkflowComplete = (events: StreamEvent[]): boolean => {
+  if (!Array.isArray(events) || events.length === 0) return false;
+  const completionKeywords = ['complete', 'completed', 'done', 'finished', 'success', 'ok'];
+
+  return events.some((ev) => {
+    if (!ev) return false;
+    const step = String(ev.step || '').toLowerCase();
+    const rawPayload = ev.payload || {};
+    const payload = rawPayload.result || rawPayload.payload || rawPayload;
+    if (completionKeywords.includes(step)) return true;
+    const status = String(payload?.status || payload?.state?.status || '').toLowerCase();
+    if (completionKeywords.includes(status)) return true;
+    return false;
+  });
+};
+
 export default function Chat() {
   // Input States
   const [inputCode, setInputCode] = useState<string>('');
   const [history, setHistory] = useState<
-    Array<{ question: string; formatted: any; reasoning?: string }>
+    Array<{ question: string; formatted: any; reasoning?: string; events?: StreamEvent[] }>
   >([]);
   const [streamEvents, setStreamEvents] = useState<
-    Array<{ step: string; payload: any }>
+    StreamEvent[]
   >([]);
   const [expandedReasoning, setExpandedReasoning] = useState<Record<number, boolean>>({});
   // Loading state
@@ -69,7 +270,10 @@ export default function Chat() {
     }
 
     const currentMessage = inputCode;
-    setHistory((prev) => [...prev, { question: currentMessage, formatted: null, reasoning: '' }]);
+    setHistory((prev) => [
+      ...prev,
+      { question: currentMessage, formatted: null, reasoning: '', events: [] },
+    ]);
     setInputCode('');
     setStreamEvents([]);
     setLoading(true);
@@ -108,8 +312,7 @@ export default function Chat() {
       const decoder = new TextDecoder();
       let buffer = '';
       let finalFormatted: any = null;
-      const collectedEvents: Array<{ step: string; payload: any }> = [];
-      const reasoningLines: string[] = [];
+      const collectedEvents: StreamEvent[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -125,15 +328,6 @@ export default function Chat() {
             const evt = JSON.parse(jsonStr);
             collectedEvents.push({ step: evt.step, payload: evt });
             setStreamEvents((prev) => [...collectedEvents]);
-            const summary =
-              evt?.result?.summary ||
-              evt?.result?.resumen ||
-              evt?.state?.status ||
-              evt?.result?.message ||
-              '';
-            if (summary) {
-              reasoningLines.push(`${evt.step}: ${summary}`);
-            }
             if (evt.step === 'complete') {
               finalFormatted =
                 evt?.result?.formatted_response ||
@@ -175,7 +369,8 @@ export default function Chat() {
       setHistory((prev) => {
         const updated = [...prev];
         updated[updated.length - 1].formatted = finalFormatted;
-        updated[updated.length - 1].reasoning = reasoningLines.join('\n');
+        updated[updated.length - 1].events = [...collectedEvents];
+        updated[updated.length - 1].reasoning = buildModelReasoning(collectedEvents).join('\n');
         return updated;
       });
       setLoading(false);
@@ -255,13 +450,21 @@ export default function Chat() {
           mb="8px"
         >
           <Flex w="100%" direction="column" gap="20px">
-            {history.map((item, idx) => (
-              <Box
-                key={`hist-${idx}`}
-                w="100%"
-                borderRadius="16px"
-                p="6px"
-              >
+            {history.map((item, idx) => {
+              const isLatest = idx === history.length - 1;
+              const eventsForReasoning =
+                isLatest && item.formatted === null ? streamEvents : item.events || [];
+              const workflowComplete = isWorkflowComplete(eventsForReasoning);
+              const reasoningList = workflowComplete ? buildModelReasoning(eventsForReasoning) : [];
+              const hasReasoning = reasoningList.length > 0;
+              const shouldShowReasoningPanel = workflowComplete;
+              return (
+                <Box
+                  key={`hist-${idx}`}
+                  w="100%"
+                  borderRadius="16px"
+                  p="6px"
+                >
                 {/* Pregunta a la derecha, sin iconos */}
                 <Flex w="100%" justify="flex-end" mb="12px">
                   <Box
@@ -298,7 +501,7 @@ export default function Chat() {
                 {/* Respuesta continua */}
                 <Flex w="100%" direction="column" gap="10px">
                   {/* Show loading indicator while waiting for response */}
-                  {item.formatted === null && idx === history.length - 1 && streamEvents.length > 0 && (
+                  {item.formatted === null && isLatest && streamEvents.length > 0 && (
                     <Box border="1px solid" borderColor={borderColor} borderRadius="12px" p="12px" bg={questionBg}>
                       <Text fontWeight="700" color={textColor} mb="8px">
                         Progreso
@@ -317,13 +520,13 @@ export default function Chat() {
                         const buildTitle = (identifier: string, index: number) => {
                           const id = identifier.toLowerCase();
                           const base = 'Paso ' + (index + 1) + ' - ';
-                          if (id.includes('triage')) return base + 'Clasificacion de la consulta';
-                          if (id.includes('intent')) return base + 'Clasificacion del patron analitico';
-                          if (id.includes('schema')) return base + 'Priorizacion de tablas';
-                          if (id.includes('sql_generation')) return base + 'Generacion de SQL';
-                          if (id.includes('verification')) return base + 'Verificacion de la consulta';
-                          if (id.includes('sql_execution')) return base + 'Ejecucion de la consulta';
-                          if (id.includes('viz') || id.includes('visualization')) return base + 'Generacion de la visualizacion';
+                          if (id.includes('triage')) return base + 'Clasificación de la consulta';
+                          if (id.includes('intent')) return base + 'Clasificación del patrón analítico';
+                          if (id.includes('schema')) return base + 'Priorización de tablas';
+                          if (id.includes('sql_generation')) return base + 'Generación de SQL';
+                          if (id.includes('verification')) return base + 'Verificación de la consulta';
+                          if (id.includes('sql_execution')) return base + 'Ejecución de la consulta';
+                          if (id.includes('viz') || id.includes('visualization')) return base + 'Generación de la visualización';
                           return base + 'Paso adicional del agente';
                         };
 
@@ -332,10 +535,24 @@ export default function Chat() {
                           const successValues = ['ok', 'success', 'completed', 'done'];
                           const isSuccess = (val: any) =>
                             val === true || successValues.includes(String(val).toLowerCase());
+                          const hasSuccessText = (text?: string | null) => {
+                            if (!text || typeof text !== 'string') return false;
+                            const t = text.toLowerCase();
+                            return t.includes('exito') || t.includes('éxito') || t.includes('success') || t.includes('ok');
+                          };
+                          const pickNumber = (...values: any[]): number | null => {
+                            for (const val of values) {
+                              if (typeof val === 'number' && !Number.isNaN(val)) return val;
+                              if (typeof val === 'string' && val.trim() !== '' && !Number.isNaN(Number(val))) {
+                                return Number(val);
+                              }
+                            }
+                            return null;
+                          };
                           const errorMsg =
                             pickString(
                               payload?.error,
-                              payload?.message,
+                              payload?.errorMessage,
                               payload?.descripcion,
                               payload?.detail,
                               payload?.reason,
@@ -361,21 +578,21 @@ export default function Chat() {
                             const arquetipo = pickString(payload?.arquetipo, payload?.archetype);
                             const razon = pickString(payload?.razon, payload?.reasoning, payload?.resumen, payload?.detalle);
                             const parts: string[] = [];
-                            if (intent) parts.push(`intencion '${intent}'`);
-                            if (tipoPatron) parts.push(`un patron de ${tipoPatron}`);
+                            if (intent) parts.push(`intención '${intent}'`);
+                            if (tipoPatron) parts.push(`un patrón de ${tipoPatron}`);
                             if (arquetipo) parts.push(`arquetipo ${arquetipo}`);
                             const main =
                               parts.length > 0
-                                ? `Se identifico que la consulta tiene ${parts.join(' y ')}.`
-                                : 'Se identifico la intencion de la consulta.';
-                            return razon ? `${main} ${razon}`.trim() : main;
+                                ? `Se identificó que la consulta tiene ${parts.join(' y ')}.`
+                                : 'Se identificó la intención de la consulta.';
+                            return razon ? `${main} Justificación: ${razon}`.trim() : main;
                           }
 
                           if (id.includes('schema')) {
                             const tables =
                               asList(payload?.tablas_priorizadas) ||
-                              asList(payload?.tablas) ||
-                              asList(payload?.tables) ||
+                                asList(payload?.tablas) ||
+                                asList(payload?.tables) ||
                               asList(payload?.prioritized_tables) ||
                               asList(payload?.tablas_prioritizadas);
                             if (tables && tables.length > 0) {
@@ -394,7 +611,7 @@ export default function Chat() {
                                 payload?.sql_query,
                               ) || '';
                             if (sql) return `La consulta SQL generada es: ${sql}`;
-                            return 'El agente genero la consulta SQL para responder a la pregunta.';
+                            return 'El agente generó la consulta SQL para responder a la pregunta.';
                           }
 
                           if (id.includes('verification')) {
@@ -402,19 +619,43 @@ export default function Chat() {
                               return 'La consulta fue verificada correctamente.';
                             }
                             if (errorMsg) {
-                              return `Durante la verificacion se encontraron problemas: ${errorMsg}`;
+                              return `Durante la verificación se encontraron problemas: ${errorMsg}`;
                             }
                             return 'Se ha verificado la consistencia de la consulta generada.';
                           }
 
                           if (id.includes('sql_execution')) {
-                            if (isSuccess(payload?.success) || isSuccess(payload?.ok) || isSuccess(payload?.status)) {
-                              return 'La ejecucion de la consulta fue exitosa.';
+                            const totalFilas = pickNumber(
+                              payload?.total_filas,
+                              payload?.total_rows,
+                              payload?.row_count,
+                              payload?.count,
+                              payload?.num_rows,
+                            );
+                            const successText = pickString(
+                              payload?.message,
+                              payload?.resumen,
+                              payload?.summary,
+                              payload?.status,
+                              payload?.state?.status,
+                            );
+                            const successFlag =
+                              isSuccess(payload?.success) ||
+                              isSuccess(payload?.ok) ||
+                              isSuccess(payload?.status) ||
+                              hasSuccessText(successText);
+
+                            if (successFlag) {
+                              let line = 'La ejecución de la consulta fue exitosa.';
+                              if (totalFilas !== null) {
+                                line += ` Se devolvieron ${totalFilas} filas.`;
+                              }
+                              return line;
                             }
                             if (errorMsg) {
-                              return `La ejecucion de la consulta presento un error: ${errorMsg}`;
+                              return `La ejecución de la consulta presentó un error: ${errorMsg}`;
                             }
-                            return 'La consulta se ejecuto sobre la base de datos.';
+                            return 'La ejecución de la consulta se completó, pero no se dispone de más detalle.';
                           }
 
                           if (id.includes('viz') || id.includes('visualization')) {
@@ -426,11 +667,11 @@ export default function Chat() {
                                 payload?.graph_type,
                                 payload?.viz_type,
                               ) || '';
-                            if (tipoGrafico) return `Se genero la visualizacion de tipo ${tipoGrafico}.`;
-                            return 'Se genero la visualizacion de los resultados de la consulta.';
+                            if (tipoGrafico) return `Se generó la visualización de tipo ${tipoGrafico}.`;
+                            return 'Se generó la visualización de los resultados de la consulta.';
                           }
 
-                          return 'El agente reporta informacion adicional.';
+                          return 'El agente reporta información adicional.';
                         };
 
                         const renderStep = (ev: { step: string; payload: any }, idxStep: number) => {
@@ -494,7 +735,7 @@ export default function Chat() {
                   {/* Only show data table, insight, and Power BI if no error */}
                   {!item.formatted?.error && (
                     <>
-                      {item.reasoning && item.reasoning.trim() !== '' && (
+                      {shouldShowReasoningPanel && (
                         <Box
                           border="1px solid"
                           borderColor={borderColor}
@@ -520,9 +761,19 @@ export default function Chat() {
                             </Button>
                           </Flex>
                           {expandedReasoning[idx] && (
-                            <Text whiteSpace="pre-wrap" color="gray.700">
-                              {item.reasoning}
-                            </Text>
+                            workflowComplete
+                              ? hasReasoning ? (
+                                <Flex direction="column">
+                                  {reasoningList.map((line, lineIdx) => (
+                                    <Text key={`${idx}-reason-${lineIdx}`} color="gray.700" mt={lineIdx === 0 ? 0 : 2}>
+                                      {`${lineIdx + 1}. ${line}`}
+                                    </Text>
+                                  ))}
+                                </Flex>
+                              ) : (
+                                <Text color="gray.700">Aún no hay razonamiento disponible.</Text>
+                              )
+                              : <Text color="gray.700">El razonamiento estará disponible cuando el proceso finalice.</Text>
                           )}
                         </Box>
                       )}
@@ -568,7 +819,7 @@ export default function Chat() {
                       {item.formatted?.html_url && (
                         <Box>
                           <Text fontWeight="700" color={textColor} mb="6px">
-                            Gr�fica
+                            Gráfica
                           </Text>
                           <Box
                             as="iframe"
@@ -600,7 +851,8 @@ export default function Chat() {
                   )}
                 </Flex>
               </Box>
-            ))}
+            );
+          })}
           </Flex>
         </Flex>
       </Flex>
