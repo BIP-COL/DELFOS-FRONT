@@ -1,9 +1,25 @@
 ﻿'use client';
-/*eslint-disable*/
+/* eslint-disable */
 
 import { ChatBody } from '@/types/types';
-import { Box, Button, Flex, Input, Text, useColorModeValue, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react';
+import {
+  Box,
+  Button,
+  Flex,
+  Input,
+  Text,
+  useColorModeValue,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  Progress,
+  Icon,
+} from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
+import { FiSearch, FiBarChart2, FiMenu, FiFilter, FiClock, FiFileText } from 'react-icons/fi';
 
 type StreamEvent = { step: string; payload: any };
 
@@ -26,8 +42,7 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
   const asList = (value: any) => (Array.isArray(value) ? value : null);
 
   const successValues = ['ok', 'success', 'completed', 'done', 'true'];
-  const isSuccess = (val: any) =>
-    val === true || successValues.includes(String(val).toLowerCase());
+  const isSuccess = (val: any) => val === true || successValues.includes(String(val).toLowerCase());
   const hasSuccessText = (text?: string | null) => {
     if (!text || typeof text !== 'string') return false;
     const t = text.toLowerCase();
@@ -35,6 +50,20 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
   };
 
   const lines: string[] = [];
+  const stepLabel = (id: string) => {
+    if (id.includes('triage')) return '**Intención:** ';
+    if (id.includes('intent')) return '**Clasificación:** ';
+    if (id.includes('schema')) return '**Priorización de tablas:** ';
+    if (id.includes('sql_generation')) return '**Generación SQL:** ';
+    if (id.includes('sql_execution')) return '**Ejecución SQL:** ';
+    if (id.includes('verification')) return '**Verificación:** ';
+    if (id.includes('visualization') || id.includes('viz')) return '**Visualización (Power BI):** ';
+    if (id.includes('graph')) return '**Renderización de gráfica:** ';
+    if (id.includes('format')) return '**Consolidación de respuesta:** ';
+    if (id.includes('complete')) return '**Finalización:** ';
+    if (id.includes('error')) return '**Error:** ';
+    return '**Paso adicional:** ';
+  };
 
   events.forEach((ev) => {
     if (!ev) return;
@@ -50,37 +79,31 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
     };
 
     if (identifier.includes('triage')) {
-      const classification =
-        pickString(payload?.query_type, payload?.category, payload?.categoria, payload?.domain, payload?.area) || '';
       const reasoning =
         pickString(payload?.reasoning, payload?.resumen, payload?.summary, payload?.detalle) || '';
-      let line = classification
-        ? `Se clasificó la consulta como ${classification}.`
-        : 'Se clasificó la consulta.';
       if (reasoning) {
-        line += ` Detalle: ${reasoning}`;
+        const firstSentence = reasoning.split(/[.;]/)[0].trim();
+        const simplified = firstSentence.replace(/\s+/g, ' ').trim();
+        addLine(stepLabel(identifier) + simplified);
+      } else {
+        const classification =
+          pickString(payload?.query_type, payload?.category, payload?.categoria, payload?.domain, payload?.area) || '';
+        const line = classification
+          ? `Se clasificó la consulta como ${classification}.`
+          : 'Se clasificó la consulta.';
+        addLine(stepLabel(identifier) + line);
       }
-      addLine(line);
       return;
     }
 
     if (identifier.includes('intent')) {
-      const intent = pickString(payload?.intent, payload?.intention, payload?.objetivo);
       const tipoPatron = pickString(payload?.tipo_patron, payload?.patron, payload?.pattern, payload?.tipo);
-      const arquetipo = pickString(payload?.arquetipo, payload?.archetype);
-      const razon = pickString(payload?.razon, payload?.reasoning, payload?.resumen, payload?.detalle);
-      let line = 'Se identificó la intención de la consulta.';
-      if (tipoPatron || arquetipo || intent) {
-        line = 'Se identificó que el patrón analítico es';
-        if (tipoPatron) line += ` de ${tipoPatron}`;
-        if (arquetipo) line += ` (arquetipo ${arquetipo})`;
-        if (intent) line += ` con intención '${intent}'`;
-        line += '.';
+      const label = stepLabel(identifier);
+      if (tipoPatron) {
+        addLine(label + `Se identificó que el patrón analítico es de ${tipoPatron}.`);
+      } else {
+        addLine(label + 'Se identificó la intención de la consulta.');
       }
-      if (razon) {
-        line += ` Justificación del modelo: ${razon}`;
-      }
-      addLine(line);
       return;
     }
 
@@ -92,9 +115,9 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
         asList(payload?.prioritized_tables) ||
         asList(payload?.tablas_prioritizadas);
       if (tables && tables.length > 0) {
-        addLine(`Se priorizaron las siguientes tablas para construir la respuesta: ${tables.join(', ')}.`);
+        addLine(stepLabel(identifier) + `Se priorizaron las siguientes tablas para construir la respuesta: ${tables.join(', ')}.`);
       } else {
-        addLine('Se priorizaron las tablas relevantes para construir la respuesta.');
+        addLine(stepLabel(identifier) + 'Se priorizaron las tablas relevantes para construir la respuesta.');
       }
       return;
     }
@@ -109,9 +132,9 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
           payload?.sql_query,
         ) || '';
       if (sql) {
-        addLine(`Se generó la siguiente consulta SQL para responder la pregunta: ${sql}`);
+        addLine(stepLabel(identifier) + `Se generó la siguiente consulta SQL para responder la pregunta: ${sql}`);
       } else {
-        addLine('Se generó la consulta SQL para responder la pregunta.');
+        addLine(stepLabel(identifier) + 'Se generó la consulta SQL para responder la pregunta.');
       }
       return;
     }
@@ -120,11 +143,11 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
       const verificationMsg =
         pickString(payload?.message, payload?.detalle, payload?.descripcion, payload?.reason, payload?.resumen) || '';
       if (isSuccess(payload?.success) || isSuccess(payload?.ok) || isSuccess(payload?.status)) {
-        addLine('La consulta fue verificada correctamente.');
+        addLine(stepLabel(identifier) + 'La consulta fue verificada correctamente.');
       } else if (verificationMsg) {
-        addLine(`Durante la verificación se encontraron los siguientes puntos: ${verificationMsg}`);
+        addLine(stepLabel(identifier) + `Durante la verificación se encontraron los siguientes puntos: ${verificationMsg}`);
       } else {
-        addLine('Se realizó una verificación de la consulta.');
+        addLine(stepLabel(identifier) + 'Se realizó una verificación de la consulta.');
       }
       return;
     }
@@ -157,16 +180,16 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
         if (totalFilas !== null) {
           line += ` Se devolvieron ${totalFilas} filas.`;
         }
-        addLine(line);
+        addLine(stepLabel(identifier) + line);
       } else if (execMsg) {
-        addLine(`La ejecución de la consulta presentó un error: ${execMsg}.`);
+        addLine(stepLabel(identifier) + `La ejecución de la consulta presentó un error: ${execMsg}.`);
       } else {
-        addLine('La ejecución de la consulta se completó, pero no se dispone de más detalle.');
+        addLine(stepLabel(identifier) + 'La ejecución de la consulta se completó, pero no se dispone de más detalle.');
       }
       return;
     }
 
-    if (identifier.includes('viz') || identifier.includes('visualization') || identifier.includes('graph')) {
+    if (identifier.includes('visualization') || identifier.includes('viz')) {
       const tipoGrafico =
         pickString(
           payload?.tipo_grafico,
@@ -175,15 +198,48 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
           payload?.graph_type,
           payload?.viz_type,
         ) || '';
-      if (tipoGrafico) {
-        addLine(`Se generó una visualización de tipo ${tipoGrafico} para representar los resultados.`);
+      let line = tipoGrafico
+        ? `Se generó el enlace de Power BI para una gráfica tipo ${tipoGrafico}.`
+        : 'Se generó el enlace de Power BI para la gráfica.';
+      addLine(stepLabel(identifier) + line);
+      return;
+    }
+
+    if (identifier.includes('graph')) {
+      const statusText =
+        pickString(payload?.status, payload?.state?.status, payload?.mensaje, payload?.message) || '';
+      if (statusText) {
+        addLine(stepLabel(identifier) + `Se renderizó la gráfica en el panel de resultados (${statusText}).`);
       } else {
-        addLine('Se generó una visualización para representar los resultados.');
+        addLine(stepLabel(identifier) + 'Se renderizó la gráfica en el panel de resultados.');
       }
       return;
     }
 
-    addLine('El agente realizó un paso adicional de procesamiento.');
+    if (identifier.includes('format')) {
+      addLine(stepLabel(identifier) + 'Se consolidó la respuesta final para el usuario.');
+      return;
+    }
+
+    if (identifier.includes('complete')) {
+      addLine(stepLabel(identifier) + 'Ejecución global finalizada correctamente.');
+      return;
+    }
+
+    if (identifier.includes('error')) {
+      const errMsg =
+        pickString(
+          payload?.error,
+          payload?.message,
+          payload?.detalle,
+          payload?.descripcion,
+          payload?.reason,
+        ) || '';
+      addLine(stepLabel(identifier) + (errMsg ? `Ejecución global finalizada con error: ${errMsg}` : 'Ejecución global finalizada con error.'));
+      return;
+    }
+
+    addLine(stepLabel(identifier) + 'El agente realizó un paso adicional de procesamiento.');
   });
 
   return lines;
@@ -206,18 +262,16 @@ const isWorkflowComplete = (events: StreamEvent[]): boolean => {
 };
 
 export default function Chat() {
-  // Input States
   const [inputCode, setInputCode] = useState<string>('');
   const [history, setHistory] = useState<
     Array<{ question: string; formatted: any; reasoning?: string; events?: StreamEvent[] }>
   >([]);
-  const [streamEvents, setStreamEvents] = useState<
-    StreamEvent[]
-  >([]);
+  const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
   const [expandedReasoning, setExpandedReasoning] = useState<Record<number, boolean>>({});
-  // Loading state
   const [loading, setLoading] = useState<boolean>(false);
-  // Animated loading text
+  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(false);
+  const [activeView, setActiveView] = useState<'chat' | 'reports'>('chat');
+  const [reportsQuery, setReportsQuery] = useState<string>('');
   const thinkingWords = ['Pensando', 'Analizando', 'Consultando', 'Procesando'];
   const [thinkingIndex, setThinkingIndex] = useState<number>(0);
   const [dots, setDots] = useState<string>('');
@@ -231,7 +285,6 @@ export default function Chat() {
     const interval = setInterval(() => {
       setDots((prev) => {
         if (prev.length >= 3) {
-          // Change word when dots reset
           setThinkingIndex((idx) => (idx + 1) % thinkingWords.length);
           return '';
         }
@@ -241,8 +294,6 @@ export default function Chat() {
     return () => clearInterval(interval);
   }, [loading]);
 
-  // API Key
-  // const [apiKey, setApiKey] = useState<string>(apiKeyApp);
   const borderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
   const inputColor = useColorModeValue('navy.700', 'white');
   const brandColor = '#0F4C9B';
@@ -253,15 +304,35 @@ export default function Chat() {
     { color: 'gray.500' },
     { color: 'whiteAlpha.600' },
   );
+  const reportsSearchBorder = useColorModeValue('#d7ddff', '#334');
   const hasHistory = history.length > 0;
+
+  const reportsData = [
+    {
+      title: 'Informe comercial',
+      description: 'Ventas por tipo de producto y region.',
+      owner: 'Andres Leon',
+      timeLabel: 'hace 2 dias',
+    },
+  ];
+
+  const normalizeText = (s: string) =>
+    (s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  const normalizedQuery = normalizeText(reportsQuery);
+  const filteredReports = normalizedQuery
+    ? reportsData.filter((item) => normalizeText(item.title).includes(normalizedQuery))
+    : reportsData;
+
   const handleTranslate = async () => {
     const maxCodeLength = 700;
-
     if (!inputCode) {
       alert('Please enter your message.');
       return;
     }
-
     if (inputCode.length > maxCodeLength) {
       alert(
         `Please enter code less than ${maxCodeLength} characters. You are currently at ${inputCode.length} characters.`,
@@ -270,10 +341,7 @@ export default function Chat() {
     }
 
     const currentMessage = inputCode;
-    setHistory((prev) => [
-      ...prev,
-      { question: currentMessage, formatted: null, reasoning: '', events: [] },
-    ]);
+    setHistory((prev) => [...prev, { question: currentMessage, formatted: null, reasoning: '', events: [] }]);
     setInputCode('');
     setStreamEvents([]);
     setLoading(true);
@@ -284,15 +352,10 @@ export default function Chat() {
       'http://127.0.0.1:8000/api/chat/stream';
 
     try {
-      const payload = {
-        message: currentMessage,
-        user_id: 'anonymous',
-      };
+      const payload = { message: currentMessage, user_id: 'anonymous' };
       const response = await fetch(streamUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify(payload),
       });
@@ -314,21 +377,19 @@ export default function Chat() {
       let finalFormatted: any = null;
       const collectedEvents: StreamEvent[] = [];
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
+      const processBuffer = (buf: string) => {
+        const normalized = buf.replace(/\r\n/g, '\n');
+        const parts = normalized.split('\n\n');
+        const remainder = parts.pop() || '';
         for (const part of parts) {
           const line = part.trim();
           if (!line.startsWith('data:')) continue;
           const jsonStr = line.replace(/^data:\s*/, '');
           try {
             const evt = JSON.parse(jsonStr);
-            collectedEvents.push({ step: evt.step, payload: evt });
-            setStreamEvents((prev) => [...collectedEvents]);
-            if (evt.step === 'complete') {
+            collectedEvents.push({ step: evt.step || evt.type, payload: evt });
+            setStreamEvents([...collectedEvents]);
+            if ((evt.step || evt.type) === 'complete') {
               finalFormatted =
                 evt?.result?.formatted_response ||
                 evt?.result?.formattedResponse ||
@@ -338,11 +399,20 @@ export default function Chat() {
                 evt?.message ||
                 null;
             }
-          } catch (_err) {
-            // ignore parse errors
+          } catch {
+            /* ignore */
           }
         }
+        return remainder;
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = processBuffer(buffer);
       }
+      if (buffer.trim().length > 0) buffer = processBuffer(buffer);
 
       if (!finalFormatted && collectedEvents.length > 0) {
         const last = collectedEvents[collectedEvents.length - 1].payload;
@@ -359,7 +429,7 @@ export default function Chat() {
       if (!finalFormatted) {
         setHistory((prev) => {
           const updated = [...prev];
-          updated[updated.length - 1].formatted = { error: 'El stream no devolvi� respuesta final.' };
+          updated[updated.length - 1].formatted = { error: 'El stream no devolvió respuesta final.' };
           return updated;
         });
         setLoading(false);
@@ -386,28 +456,7 @@ export default function Chat() {
     }
   };
 
-  // -------------- Copy Response --------------
-  // const copyToClipboard = (text: string) => {
-  //   const el = document.createElement('textarea');
-  //   el.value = text;
-  //   document.body.appendChild(el);
-  //   el.select();
-  //   document.execCommand('copy');
-  //   document.body.removeChild(el);
-  // };
-
-  // *** Initializing apiKey with .env.local value
-  // useEffect(() => {
-  // ENV file verison
-  // const apiKeyENV = process.env.NEXT_PUBLIC_OPENAI_API_KEY
-  // if (apiKey === undefined || null) {
-  //   setApiKey(apiKeyENV)
-  // }
-  // }, [])
-
-  const handleChange = (Event: any) => {
-    setInputCode(Event.target.value);
-  };
+  const handleChange = (e: any) => setInputCode(e.target.value);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -427,10 +476,71 @@ export default function Chat() {
       right="0"
       bottom="0"
       pt={{ base: '110px', md: '110px' }}
-      direction="column"
+      direction="row"
       overflow="hidden"
     >
-      {/* Main scrollable area - full width for scrollbar at edge */}
+      {/* Sidebar estilo Canva */}
+      <Flex
+        position="fixed"
+        top="90px"
+        left="0"
+        h="calc(100vh - 90px)"
+        pt="24px"
+        pb="24px"
+        direction="column"
+        align="center"
+        gap="12px"
+        bg={useColorModeValue('linear-gradient(180deg, #f5f3ff 0%, #f0f4ff 100%)', 'navy.900')}
+        w={sidebarExpanded ? '200px' : '72px'}
+        transition="width 0.2s ease"
+        borderRight="1px solid"
+        borderColor={borderColor}
+        zIndex="120"
+      >
+        <Button
+          onClick={() => setSidebarExpanded((s) => !s)}
+          variant="ghost"
+          leftIcon={<FiMenu />}
+          w={sidebarExpanded ? '160px' : '48px'}
+          justifyContent={sidebarExpanded ? 'flex-start' : 'center'}
+          borderRadius="full"
+          px={sidebarExpanded ? 4 : 0}
+          color={textColor}
+        _hover={{ bg: useColorModeValue('white', 'whiteAlpha.200') }}
+      >
+        {sidebarExpanded ? 'Menú' : ''}
+      </Button>
+      <Button
+        leftIcon={<FiSearch />}
+        variant="ghost"
+        w={sidebarExpanded ? '160px' : '48px'}
+        justifyContent={sidebarExpanded ? 'flex-start' : 'center'}
+        borderRadius="full"
+        px={sidebarExpanded ? 4 : 0}
+        color={textColor}
+        _hover={{ bg: useColorModeValue('white', 'whiteAlpha.200') }}
+        onClick={() => setActiveView('chat')}
+        bg={activeView === 'chat' ? useColorModeValue('white', 'whiteAlpha.200') : 'transparent'}
+      >
+        {sidebarExpanded ? 'Consultar' : ''}
+      </Button>
+      <Button
+        leftIcon={<FiBarChart2 />}
+        variant="ghost"
+        w={sidebarExpanded ? '160px' : '48px'}
+        justifyContent={sidebarExpanded ? 'flex-start' : 'center'}
+        borderRadius="full"
+        px={sidebarExpanded ? 4 : 0}
+        color={textColor}
+        _hover={{ bg: useColorModeValue('white', 'whiteAlpha.200') }}
+        onClick={() => setActiveView('reports')}
+        bg={activeView === 'reports' ? useColorModeValue('white', 'whiteAlpha.200') : 'transparent'}
+      >
+        {sidebarExpanded ? 'Informes' : ''}
+      </Button>
+    </Flex>
+
+      {/* Main scrollable area */}
       <Flex
         direction="column"
         flex="1"
@@ -438,19 +548,216 @@ export default function Chat() {
         minH="0"
         overflowY="auto"
         overflowX="hidden"
-        display={hasHistory ? 'flex' : 'none'}
+        display={activeView === 'reports' || hasHistory ? 'flex' : 'none'}
         pb={{ base: '80px', md: '64px' }}
+        pl={sidebarExpanded ? '220px' : '120px'}
+        pr={{ base: 4, md: 6 }}
       >
-        {/* Content container - centered with max width */}
-        <Flex
-          direction="column"
-          w="100%"
-          maxW="820px"
-          mx="auto"
-          mb="8px"
-        >
+        <Flex direction="column" w="100%" maxW="unset" mx="0" mb="8px">
           <Flex w="100%" direction="column" gap="20px">
-            {history.map((item, idx) => {
+            {activeView === 'reports' ? (
+              <Box w="100%" pt="20px" pb="40px">
+                <Box mb="16px" display="flex" flexDir="column" alignItems="center">
+                  <Text fontSize="3xl" fontWeight="800" color={textColor} mb="12px" textAlign="center">
+                    Todos los informes
+                  </Text>
+                  <Flex
+                    align="center"
+                    bg="white"
+                    borderRadius="32px"
+                    px={{ base: '14px', md: '18px' }}
+                    py={{ base: '10px', md: '12px' }}
+                    boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
+                    border="1px solid"
+                    borderColor={reportsSearchBorder}
+                    w="100%"
+                    maxW="720px"
+                    gap="10px"
+                    mx="auto"
+                  >
+                    <Icon as={FiSearch} color={brandColor} w="20px" h="20px" />
+                    <Input
+                      placeholder="Buscar en todos los informes"
+                      border="none"
+                      _focus={{ boxShadow: 'none' }}
+                      fontSize="md"
+                      color={textColor}
+                      value={reportsQuery}
+                      onChange={(e) => setReportsQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setReportsQuery('');
+                        }
+                      }}
+                    />
+                  </Flex>
+                </Box>
+
+                {normalizedQuery && (
+                  <Box
+                    mt="8px"
+                    px="12px"
+                    py="8px"
+                    bg="rgba(15,76,155,0.04)"
+                    borderRadius="12px"
+                    border="1px dashed"
+                    borderColor={reportsSearchBorder}
+                    w="100%"
+                    maxW="720px"
+                    mx="auto"
+                  >
+                    <Text fontSize="sm" color="gray.600">
+                      Mostrando resultados para "{reportsQuery}"
+                    </Text>
+                  </Box>
+                )}
+
+                {filteredReports.length === 0 && normalizedQuery ? (
+                  <Flex
+                    direction="column"
+                    align="center"
+                    justify="center"
+                    w="100%"
+                    py="32px"
+                    gap="10px"
+                    color="gray.500"
+                  >
+                    <Icon as={FiSearch} w="32px" h="32px" color="gray.400" />
+                    <Text fontWeight="700" color={textColor} textAlign="center">
+                      No encontramos resultados para "{reportsQuery}"
+                    </Text>
+                  </Flex>
+                ) : (
+                <>
+                <Box mt="20px" display="none">
+                  <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
+                    Recientes
+                  </Text>
+                  <Flex mt="12px" gap="16px" flexWrap="wrap">
+                    <Box
+                      w={{ base: '100%', sm: '260px' }}
+                      bg="white"
+                      borderRadius="16px"
+                      border="1px solid"
+                      borderColor={borderColor}
+                      boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
+                      p="16px"
+                      cursor="pointer"
+                      _hover={{ transform: 'translateY(-4px)', boxShadow: '0 12px 28px rgba(15, 76, 155, 0.18)' }}
+                      transition="all 0.15s ease"
+                    >
+                      <Flex align="center" justify="space-between" mb="10px">
+                        <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
+                        <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
+                          <Icon as={FiClock} w="14px" h="14px" />
+                          <Text>hace 2 días</Text>
+                        </Flex>
+                      </Flex>
+                      <Text fontWeight="700" color={textColor} mb="6px">
+                        Informe comercial
+                      </Text>
+                      <Text color="gray.600" fontSize="sm" mb="10px">
+                        Ventas por tipo de producto y región.
+                      </Text>
+                      <Text color="gray.600" fontSize="sm" fontWeight="600">
+                        Propietario: Andres Leon
+                      </Text>
+                    </Box>
+                  </Flex>
+                </Box>
+
+                <Box mt="24px" display="none">
+                  <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
+                    Informes
+                  </Text>
+                  <Flex mt="12px" gap="16px" flexWrap="wrap">
+                    {filteredReports.length === 0 ? (
+                      <Text color="gray.500">Sin resultados.</Text>
+                    ) : (
+                      filteredReports.map((item, idx) => (
+                        <Box
+                          key={`report-${idx}`}
+                          w={{ base: '100%', sm: '260px' }}
+                          bg="white"
+                          borderRadius="16px"
+                          border="1px solid"
+                          borderColor={borderColor}
+                          boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
+                          p="16px"
+                          cursor="pointer"
+                          _hover={{ transform: 'translateY(-4px)', boxShadow: '0 12px 28px rgba(15, 76, 155, 0.18)' }}
+                          transition="all 0.15s ease"
+                        >
+                          <Flex align="center" justify="space-between" mb="10px">
+                            <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
+                            <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
+                              <Icon as={FiClock} w="14px" h="14px" />
+                              <Text>{item.timeLabel}</Text>
+                            </Flex>
+                          </Flex>
+                          <Text fontWeight="700" color={textColor} mb="6px">
+                            {item.title}
+                          </Text>
+                          <Text color="gray.600" fontSize="sm" mb="10px">
+                            {item.description}
+                          </Text>
+                          <Text color="gray.600" fontSize="sm" fontWeight="600">
+                            Propietario: {item.owner}
+                          </Text>
+                        </Box>
+                      ))
+                    )}
+                  </Flex>
+                </Box>
+
+                <Box mt="20px">
+                  <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
+                    Informes
+                  </Text>
+                  <Flex mt="12px" gap="16px" flexWrap="wrap">
+                    {filteredReports.length === 0 ? (
+                      <Text color="gray.500">Sin resultados.</Text>
+                    ) : (
+                      filteredReports.map((item, idx) => (
+                        <Box
+                          key={`informes-${idx}`}
+                          w={{ base: '100%', sm: '260px' }}
+                          bg="white"
+                          borderRadius="16px"
+                          border="1px solid"
+                          borderColor={borderColor}
+                          boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
+                          p="16px"
+                          cursor="pointer"
+                          _hover={{ transform: 'translateY(-4px)', boxShadow: '0 12px 28px rgba(15, 76, 155, 0.18)' }}
+                          transition="all 0.15s ease"
+                        >
+                          <Flex align="center" justify="space-between" mb="10px">
+                            <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
+                            <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
+                              <Icon as={FiClock} w="14px" h="14px" />
+                              <Text>{item.timeLabel}</Text>
+                            </Flex>
+                          </Flex>
+                          <Text fontWeight="700" color={textColor} mb="6px">
+                            {item.title}
+                          </Text>
+                          <Text color="gray.600" fontSize="sm" mb="10px">
+                            {item.description}
+                          </Text>
+                          <Text color="gray.600" fontSize="sm" fontWeight="600">
+                            Propietario: {item.owner}
+                          </Text>
+                        </Box>
+                      ))
+                    )}
+                  </Flex>
+                </Box>
+                </>
+                )}
+              </Box>
+            ) : (
+              history.map((item, idx) => {
               const isLatest = idx === history.length - 1;
               const eventsForReasoning =
                 isLatest && item.formatted === null ? streamEvents : item.events || [];
@@ -458,327 +765,345 @@ export default function Chat() {
               const reasoningList = workflowComplete ? buildModelReasoning(eventsForReasoning) : [];
               const hasReasoning = reasoningList.length > 0;
               const shouldShowReasoningPanel = workflowComplete;
+
               return (
-                <Box
-                  key={`hist-${idx}`}
-                  w="100%"
-                  borderRadius="16px"
-                  p="6px"
-                >
-                {/* Pregunta a la derecha, sin iconos */}
-                <Flex w="100%" justify="flex-end" mb="12px">
-                  <Box
-                    maxW="70%"
-                    p="16px 20px"
-                    borderRadius="14px"
-                    border="1px solid"
-                    borderColor={borderColor}
-                    bg={questionBg}
-                    position="relative"
-                    _after={{
-                      content: "''",
-                      position: 'absolute',
-                      right: '-12px',
-                      top: '18px',
-                      width: '0',
-                      height: '0',
-                      borderTop: '10px solid transparent',
-                      borderBottom: '10px solid transparent',
-                      borderLeft: `12px solid ${bubbleTailColor}`,
-                    }}
-                  >
-                    <Text
-                      color={textColor}
-                      fontWeight="700"
-                      fontSize={{ base: 'sm', md: 'md' }}
-                      lineHeight={{ base: '22px', md: '24px' }}
+                <Box key={`hist-${idx}`} w="100%" borderRadius="16px" p="6px">
+                  {/* Question bubble */}
+                  <Flex w="100%" justify="flex-end" mb="12px">
+                    <Box
+                      maxW="70%"
+                      p="16px 20px"
+                      borderRadius="14px"
+                      border="1px solid"
+                      borderColor={borderColor}
+                      bg={questionBg}
+                      position="relative"
+                      _after={{
+                        content: "''",
+                        position: 'absolute',
+                        right: '-12px',
+                        top: '18px',
+                        width: '0',
+                        height: '0',
+                        borderTop: '10px solid transparent',
+                        borderBottom: '10px solid transparent',
+                        borderLeft: `12px solid ${bubbleTailColor}`,
+                      }}
                     >
-                      {item.question}
-                    </Text>
-                  </Box>
-                </Flex>
-
-                {/* Respuesta continua */}
-                <Flex w="100%" direction="column" gap="10px">
-                  {/* Show loading indicator while waiting for response */}
-                  {item.formatted === null && isLatest && streamEvents.length > 0 && (
-                    <Box border="1px solid" borderColor={borderColor} borderRadius="12px" p="12px" bg={questionBg}>
-                      <Text fontWeight="700" color={textColor} mb="8px">
-                        Progreso
+                      <Text color={textColor} fontWeight="700" fontSize={{ base: 'sm', md: 'md' }} lineHeight={{ base: '22px', md: '24px' }}>
+                        {item.question}
                       </Text>
-                      {(() => {
-                        const totalSteps = ['triage', 'intent', 'schema', 'sql_generation', 'verification', 'sql_execution', 'visualization', 'graph', 'format', 'complete'];
-                        const uniqueSteps = Array.from(new Set(streamEvents.map((e) => e.step))).filter((s) => !!s);
-                        const completed = uniqueSteps.filter((s) => totalSteps.includes(s)).length;
-                        const progressValue = Math.min(100, Math.round((completed / totalSteps.length) * 100));
+                    </Box>
+                  </Flex>
 
-                        const pickString = (...values: any[]) =>
-                          values.find((v) => typeof v === 'string' && v.trim().length > 0)?.trim();
+                  <Flex w="100%" direction="column" gap="10px">
+                    {/* Progress while streaming */}
+                    {item.formatted === null && isLatest && streamEvents.length > 0 && (
+                      <Box border="1px solid" borderColor={borderColor} borderRadius="12px" p="12px" bg={questionBg}>
+                        <Text fontWeight="700" color={textColor} mb="8px">Progreso</Text>
+                        {(() => {
+                          const normalizeType = (value?: string) =>
+                            (value || '').toLowerCase().replace(/-/g, '_').trim();
+                          const hasVisualization = streamEvents.some((e) => {
+                            const id = normalizeType(e?.step || (e?.payload as any)?.type);
+                            return id.includes('visualization') || id.includes('viz');
+                          });
+                          const expectedSteps = hasVisualization ? 10 : 8;
+                          const progressValue = Math.min(
+                            100,
+                            Math.round(((streamEvents.length || 0) / expectedSteps) * 100),
+                          );
 
-                        const asList = (value: any) => (Array.isArray(value) ? value : null);
-
-                        const buildTitle = (identifier: string, index: number) => {
-                          const id = identifier.toLowerCase();
-                          const base = 'Paso ' + (index + 1) + ' - ';
-                          if (id.includes('triage')) return base + 'Clasificación de la consulta';
-                          if (id.includes('intent')) return base + 'Clasificación del patrón analítico';
-                          if (id.includes('schema')) return base + 'Priorización de tablas';
-                          if (id.includes('sql_generation')) return base + 'Generación de SQL';
-                          if (id.includes('verification')) return base + 'Verificación de la consulta';
-                          if (id.includes('sql_execution')) return base + 'Ejecución de la consulta';
-                          if (id.includes('viz') || id.includes('visualization')) return base + 'Generación de la visualización';
-                          return base + 'Paso adicional del agente';
-                        };
-
-                        const buildBody = (identifier: string, payload: any) => {
-                          const id = identifier.toLowerCase();
-                          const successValues = ['ok', 'success', 'completed', 'done'];
-                          const isSuccess = (val: any) =>
-                            val === true || successValues.includes(String(val).toLowerCase());
-                          const hasSuccessText = (text?: string | null) => {
-                            if (!text || typeof text !== 'string') return false;
-                            const t = text.toLowerCase();
-                            return t.includes('exito') || t.includes('éxito') || t.includes('success') || t.includes('ok');
+                          const pickString = (...values: any[]) =>
+                            values.find((v) => typeof v === 'string' && v.trim().length > 0)?.trim();
+                          const asList = (value: any) => (Array.isArray(value) ? value : null);
+                          const buildTitle = (identifier: string, index: number) => {
+                            const id = normalizeType(identifier);
+                            const base = `Paso ${index + 1} - `;
+                            if (id.includes('triage')) return base + 'Intención de la consulta';
+                            if (id.includes('intent')) return base + 'Clasificación de la consulta';
+                            if (id.includes('schema')) return base + 'Selección de tablas relevantes';
+                            if (id.includes('sql_generation')) return base + 'Generación de la consulta SQL';
+                            if (id.includes('sql_execution')) return base + 'Ejecución de la consulta SQL';
+                            if (id.includes('verification')) return base + 'Verificación de la consulta';
+                            if (id.includes('visualization') || id.includes('viz')) return base + 'Generación del link de Power BI';
+                            if (id.includes('graph')) return base + 'Renderización de la gráfica';
+                            if (id.includes('format')) return base + 'Consolidación de la respuesta';
+                            if (id.includes('complete')) return base + 'Finalización';
+                            if (id.includes('error')) return base + 'Error';
+                            return base + 'Paso adicional';
                           };
-                          const pickNumber = (...values: any[]): number | null => {
-                            for (const val of values) {
-                              if (typeof val === 'number' && !Number.isNaN(val)) return val;
-                              if (typeof val === 'string' && val.trim() !== '' && !Number.isNaN(Number(val))) {
-                                return Number(val);
+                          const buildBody = (identifier: string, payload: any) => {
+                            const id = normalizeType(identifier);
+                            const successValuesLocal = ['ok', 'success', 'completed', 'done'];
+                            const isSuccessLocal = (val: any) =>
+                              val === true || successValuesLocal.includes(String(val).toLowerCase());
+                            const hasSuccessTextLocal = (text?: string | null) => {
+                              if (!text || typeof text !== 'string') return false;
+                              const t = text.toLowerCase();
+                              return t.includes('exito') || t.includes('éxito') || t.includes('success') || t.includes('ok');
+                            };
+                            const pickNumberLocal = (...values: any[]): number | null => {
+                              for (const val of values) {
+                                if (typeof val === 'number' && !Number.isNaN(val)) return val;
+                                if (typeof val === 'string' && val.trim() !== '' && !Number.isNaN(Number(val))) {
+                                  return Number(val);
+                                }
                               }
+                              return null;
+                            };
+                            const errorMsg =
+                              pickString(
+                                payload?.error,
+                                payload?.errorMessage,
+                                payload?.descripcion,
+                                payload?.detail,
+                                payload?.reason,
+                                payload?.resumen,
+                              ) || '';
+
+                            if (id.includes('triage')) {
+                              const reasoning =
+                                pickString(payload?.reasoning, payload?.resumen, payload?.summary, payload?.detalle) || '';
+                              if (reasoning) {
+                                const firstSentence = reasoning.split(/[.;]/)[0].trim();
+                                return firstSentence;
+                              }
+                              const classification =
+                                pickString(payload?.category, payload?.categoria, payload?.domain, payload?.area) || '';
+                              if (classification) return `Se clasificó la consulta como ${classification}.`;
+                              return 'La consulta se ha clasificado.';
                             }
-                            return null;
-                          };
-                          const errorMsg =
-                            pickString(
-                              payload?.error,
-                              payload?.errorMessage,
-                              payload?.descripcion,
-                              payload?.detail,
-                              payload?.reason,
-                              payload?.resumen,
-                            ) || '';
 
-                          if (id.includes('triage')) {
-                            const classification =
-                              pickString(payload?.category, payload?.categoria, payload?.domain, payload?.area) || '';
-                            const reasoning =
-                              pickString(payload?.reasoning, payload?.resumen, payload?.summary, payload?.detalle) || '';
-                            if (classification && reasoning) {
-                              return `La consulta se ha clasificado como ${classification}. Detalle del modelo: ${reasoning}`;
+                            if (id.includes('intent')) {
+                              const tipoPatron = pickString(payload?.tipo_patron, payload?.patron, payload?.pattern, payload?.tipo);
+                              if (tipoPatron) return `Se identificó que el patrón analítico es de ${tipoPatron}.`;
+                              return 'Se identificó la intención de la consulta.';
                             }
-                            if (classification) return `La consulta se ha clasificado como ${classification}.`;
-                            if (reasoning) return `La consulta se ha clasificado. Detalle del modelo: ${reasoning}`;
-                            return 'La consulta se ha clasificado.';
-                          }
 
-                          if (id.includes('intent')) {
-                            const intent = pickString(payload?.intent, payload?.intention, payload?.objetivo);
-                            const tipoPatron = pickString(payload?.tipo_patron, payload?.patron, payload?.pattern, payload?.tipo);
-                            const arquetipo = pickString(payload?.arquetipo, payload?.archetype);
-                            const razon = pickString(payload?.razon, payload?.reasoning, payload?.resumen, payload?.detalle);
-                            const parts: string[] = [];
-                            if (intent) parts.push(`intención '${intent}'`);
-                            if (tipoPatron) parts.push(`un patrón de ${tipoPatron}`);
-                            if (arquetipo) parts.push(`arquetipo ${arquetipo}`);
-                            const main =
-                              parts.length > 0
-                                ? `Se identificó que la consulta tiene ${parts.join(' y ')}.`
-                                : 'Se identificó la intención de la consulta.';
-                            return razon ? `${main} Justificación: ${razon}`.trim() : main;
-                          }
-
-                          if (id.includes('schema')) {
-                            const tables =
-                              asList(payload?.tablas_priorizadas) ||
+                            if (id.includes('schema')) {
+                              const tables =
+                                asList(payload?.tablas_priorizadas) ||
                                 asList(payload?.tablas) ||
                                 asList(payload?.tables) ||
-                              asList(payload?.prioritized_tables) ||
-                              asList(payload?.tablas_prioritizadas);
-                            if (tables && tables.length > 0) {
-                              return `Las tablas priorizadas son: ${tables.join(', ')}.`;
-                            }
-                            return 'Se han identificado y priorizado las tablas relevantes para la consulta.';
-                          }
-
-                          if (id.includes('sql_generation')) {
-                            const sql =
-                              pickString(
-                                payload?.sql,
-                                payload?.query,
-                                payload?.consulta,
-                                payload?.generated_sql,
-                                payload?.sql_query,
-                              ) || '';
-                            if (sql) return `La consulta SQL generada es: ${sql}`;
-                            return 'El agente generó la consulta SQL para responder a la pregunta.';
-                          }
-
-                          if (id.includes('verification')) {
-                            if (isSuccess(payload?.success) || isSuccess(payload?.ok) || isSuccess(payload?.status)) {
-                              return 'La consulta fue verificada correctamente.';
-                            }
-                            if (errorMsg) {
-                              return `Durante la verificación se encontraron problemas: ${errorMsg}`;
-                            }
-                            return 'Se ha verificado la consistencia de la consulta generada.';
-                          }
-
-                          if (id.includes('sql_execution')) {
-                            const totalFilas = pickNumber(
-                              payload?.total_filas,
-                              payload?.total_rows,
-                              payload?.row_count,
-                              payload?.count,
-                              payload?.num_rows,
-                            );
-                            const successText = pickString(
-                              payload?.message,
-                              payload?.resumen,
-                              payload?.summary,
-                              payload?.status,
-                              payload?.state?.status,
-                            );
-                            const successFlag =
-                              isSuccess(payload?.success) ||
-                              isSuccess(payload?.ok) ||
-                              isSuccess(payload?.status) ||
-                              hasSuccessText(successText);
-
-                            if (successFlag) {
-                              let line = 'La ejecución de la consulta fue exitosa.';
-                              if (totalFilas !== null) {
-                                line += ` Se devolvieron ${totalFilas} filas.`;
+                                asList(payload?.prioritized_tables) ||
+                                asList(payload?.tablas_prioritizadas);
+                              if (tables && tables.length > 0) {
+                                return `Las tablas priorizadas son: ${tables.join(', ')}.`;
                               }
-                              return line;
+                              return 'Se han identificado y priorizado las tablas relevantes para la consulta.';
                             }
-                            if (errorMsg) {
-                              return `La ejecución de la consulta presentó un error: ${errorMsg}`;
+
+                            if (id.includes('sql_generation')) {
+                              const sql =
+                                pickString(
+                                  payload?.sql,
+                                  payload?.query,
+                                  payload?.consulta,
+                                  payload?.generated_sql,
+                                  payload?.sql_query,
+                                ) || '';
+                              if (sql) return `La consulta SQL generada es: ${sql}`;
+                              return 'El agente generó la consulta SQL para responder a la pregunta.';
                             }
-                            return 'La ejecución de la consulta se completó, pero no se dispone de más detalle.';
-                          }
 
-                          if (id.includes('viz') || id.includes('visualization')) {
-                            const tipoGrafico =
-                              pickString(
-                                payload?.tipo_grafico,
-                                payload?.chart_type,
-                                payload?.visual_hint,
-                                payload?.graph_type,
-                                payload?.viz_type,
-                              ) || '';
-                            if (tipoGrafico) return `Se generó la visualización de tipo ${tipoGrafico}.`;
-                            return 'Se generó la visualización de los resultados de la consulta.';
-                          }
+                            if (id.includes('verification')) {
+                              if (isSuccessLocal(payload?.success) || isSuccessLocal(payload?.ok) || isSuccessLocal(payload?.status)) {
+                                return 'La consulta fue verificada correctamente.';
+                              }
+                              if (errorMsg) {
+                                return `Durante la verificación se encontraron problemas: ${errorMsg}`;
+                              }
+                              return 'Se ha verificado la consistencia de la consulta generada.';
+                            }
 
-                          return 'El agente reporta información adicional.';
-                        };
+                            if (id.includes('sql_execution')) {
+                              const totalFilas = pickNumberLocal(
+                                payload?.total_filas,
+                                payload?.total_rows,
+                                payload?.row_count,
+                                payload?.count,
+                                payload?.num_rows,
+                              );
+                              const successText = pickString(
+                                payload?.message,
+                                payload?.resumen,
+                                payload?.summary,
+                                payload?.status,
+                                payload?.state?.status,
+                              );
+                              const successFlag =
+                                isSuccessLocal(payload?.success) ||
+                                isSuccessLocal(payload?.ok) ||
+                                isSuccessLocal(payload?.status) ||
+                                hasSuccessTextLocal(successText);
 
-                        const renderStep = (ev: { step: string; payload: any }, idxStep: number) => {
-                          const rawPayload = ev.payload || {};
-                          const payload = rawPayload.result || rawPayload.payload || rawPayload;
-                          const identifier =
-                            `${ev.step || ''} ${rawPayload?.type || ''} ${rawPayload?.name || ''}`.trim() || 'paso';
+                              if (successFlag) {
+                                let line = 'La ejecución de la consulta fue exitosa.';
+                                if (totalFilas !== null) {
+                                  line += ` Se devolvieron ${totalFilas} filas.`;
+                                }
+                                return line;
+                              }
+                              if (errorMsg) {
+                                return `La ejecución de la consulta presentó un error: ${errorMsg}`;
+                              }
+                              return 'La ejecución de la consulta se completó, pero no se dispone de más detalle.';
+                            }
+
+                            if (id.includes('visualization') || id.includes('viz')) {
+                              const tipoGrafico =
+                                pickString(
+                                  payload?.tipo_grafico,
+                                  payload?.chart_type,
+                                  payload?.visual_hint,
+                                  payload?.graph_type,
+                                  payload?.viz_type,
+                                ) || '';
+                              if (tipoGrafico) return `Se generó la visualización de tipo ${tipoGrafico}.`;
+                              return 'Se generó la visualización de los resultados de la consulta.';
+                            }
+
+                            if (id.includes('graph')) {
+                              return 'Se renderizó la gráfica en el panel de resultados.';
+                            }
+
+                            if (id.includes('format')) return 'Se consolidó la respuesta final para el usuario.';
+                            if (id.includes('complete')) return 'Ejecución global finalizada correctamente.';
+                            if (id.includes('error')) {
+                              return errorMsg
+                                ? `Ejecución global finalizada con error: ${errorMsg}`
+                                : 'Ejecución global finalizada con error.';
+                            }
+                            return 'El agente reporta información adicional.';
+                          };
+                          const renderStep = (ev: { step: string; payload: any }, idxStep: number) => {
+                            const rawPayload = ev.payload || {};
+                            const payload = rawPayload.result || rawPayload.payload || rawPayload;
+                            const identifier =
+                              `${ev.step || ''} ${rawPayload?.type || ''} ${rawPayload?.name || ''}`.trim() || 'paso';
+                            return (
+                              <Box key={`${ev.step}-${idxStep}`} p="10px" borderRadius="10px" bg="white" border="1px solid" borderColor={borderColor} w="100%">
+                                <Text fontWeight="700" color={textColor} mb="4px">
+                                  {buildTitle(identifier, idxStep)}
+                                </Text>
+                                <Text color="gray.700" whiteSpace="pre-wrap">
+                                  {buildBody(identifier, payload)}
+                                </Text>
+                              </Box>
+                            );
+                          };
 
                           return (
-                            <Box key={`${ev.step}-${idxStep}`} p="10px" borderRadius="10px" bg="white" border="1px solid" borderColor={borderColor} w="100%">
-                              <Text fontWeight="700" color={textColor} mb="4px">
-                                {buildTitle(identifier, idxStep)}
-                              </Text>
-                              <Text color="gray.700" whiteSpace="pre-wrap">
-                                {buildBody(identifier, payload)}
-                              </Text>
-                            </Box>
+                            <>
+                              <Progress value={progressValue} size="sm" mb="10px" w="100%" />
+                              <Flex direction="column" gap="8px" w="100%">
+                                {streamEvents.map((ev, i) => renderStep(ev, i))}
+                              </Flex>
+                            </>
                           );
-                        };
-
-                        return (
-                          <>
-                            <Progress value={progressValue} size="sm" mb="10px" w="100%" />
-                            <Flex direction="column" gap="8px" w="100%">
-                              {streamEvents.map((ev, i) => renderStep(ev, i))}
-                            </Flex>
-                          </>
-                        );
-                      })()}
-                    </Box>
-                  )}
-                  {item.formatted === null && streamEvents.length === 0 && (
-                    <Box>
-                      <Text color="gray.500" fontStyle="italic">
-                        {thinkingWords[thinkingIndex]}
-                        {dots}
-                      </Text>
-                    </Box>
-                  )}
-                  {/* Show error message if present */}
-                  {item.formatted?.error && (
-                    <>
-                      {/* Show patron and arquetipo info before error, only if not both NA */}
-                      {!(item.formatted?.patron === 'NA' && item.formatted?.arquetipo === 'NA') && (
-                        <Box>
-                          <Text color={textColor}>
-                            El patr�n identificado es: {item.formatted?.patron || 'N/A'} y la pregunta es de arquetipo {item.formatted?.arquetipo || 'N/A'}
-                          </Text>
-                        </Box>
-                      )}
-                      <Box
-                        py="4px"
-                        px="12px"
-                        borderLeft="4px solid"
-                        borderColor="red.400"
-                      >
-                        <Text color="red.700">{item.formatted.error}</Text>
+                        })()}
                       </Box>
-                    </>
-                  )}
-                  {/* Only show data table, insight, and Power BI if no error */}
-                  {!item.formatted?.error && (
-                    <>
-                      {shouldShowReasoningPanel && (
-                        <Box
-                          border="1px solid"
-                          borderColor={borderColor}
-                          borderRadius="12px"
-                          p="12px"
-                          bg={questionBg}
-                        >
-                          <Flex align="center" justify="space-between" mb="8px">
-                            <Text fontWeight="700" color={textColor}>
-                              Razonamiento del modelo
+                    )}
+
+                    {item.formatted === null && streamEvents.length === 0 && (
+                      <Box>
+                        <Text color="gray.500" fontStyle="italic">
+                          {thinkingWords[thinkingIndex]}
+                          {dots}
+                        </Text>
+                      </Box>
+                    )}
+
+                    {item.formatted?.error && (
+                      <>
+                        {!(item.formatted?.patron === 'NA' && item.formatted?.arquetipo === 'NA') && (
+                          <Box>
+                            <Text color={textColor}>
+                              El patrón identificado es: {item.formatted?.patron || 'N/A'} y la pregunta es de arquetipo {item.formatted?.arquetipo || 'N/A'}
                             </Text>
-                            <Button
-                              size="xs"
-                              variant="ghost"
-                              onClick={() =>
-                                setExpandedReasoning((prev) => ({
-                                  ...prev,
-                                  [idx]: !prev[idx],
-                                }))
-                              }
-                            >
-                              {expandedReasoning[idx] ? 'Ocultar' : 'Ver razonamiento'}
-                            </Button>
-                          </Flex>
-                          {expandedReasoning[idx] && (
-                            workflowComplete
-                              ? hasReasoning ? (
-                                <Flex direction="column">
-                                  {reasoningList.map((line, lineIdx) => (
-                                    <Text key={`${idx}-reason-${lineIdx}`} color="gray.700" mt={lineIdx === 0 ? 0 : 2}>
-                                      {`${lineIdx + 1}. ${line}`}
-                                    </Text>
-                                  ))}
-                                </Flex>
-                              ) : (
-                                <Text color="gray.700">Aún no hay razonamiento disponible.</Text>
-                              )
-                              : <Text color="gray.700">El razonamiento estará disponible cuando el proceso finalice.</Text>
-                          )}
+                          </Box>
+                        )}
+                        <Box py="4px" px="12px" borderLeft="4px solid" borderColor="red.400">
+                          <Text color="red.700">{item.formatted.error}</Text>
                         </Box>
-                      )}
-                      {Array.isArray(item.formatted?.datos) &&
-                        item.formatted.datos.length > 0 && (
+                      </>
+                    )}
+
+                    {!item.formatted?.error && (
+                      <>
+                        {shouldShowReasoningPanel && (
+                          <Box border="1px solid" borderColor={borderColor} borderRadius="12px" p="12px" bg={questionBg}>
+                            <Flex align="center" justify="space-between" mb="8px">
+                              <Text fontWeight="700" color={textColor}>
+                                Razonamiento del modelo
+                              </Text>
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() =>
+                                  setExpandedReasoning((prev) => ({
+                                    ...prev,
+                                    [idx]: !prev[idx],
+                                  }))
+                                }
+                              >
+                                {expandedReasoning[idx] ? 'Ocultar' : 'Ver razonamiento'}
+                              </Button>
+                            </Flex>
+                            {expandedReasoning[idx] && (
+                              workflowComplete ? (
+                                hasReasoning ? (
+                                  <Flex direction="column">
+                                    {reasoningList.map((line, lineIdx) => (
+                                      (() => {
+                                        const match = line.match(/^\*\*(.+?)\*\*\s*(.*)$/);
+                                        const indexText = `${lineIdx + 1}. `;
+                                        if (match) {
+                                          const [, rawLabel, rest] = match;
+                                          const label = rawLabel.replace(/:$/g, '');
+                                          return (
+                                            <Text
+                                              key={`${idx}-reason-${lineIdx}`}
+                                              color="gray.700"
+                                              mt={lineIdx === 0 ? 0 : 2}
+                                            >
+                                              <Text as="span" fontWeight="700">
+                                                {indexText}
+                                              </Text>
+                                              <Text as="span" fontWeight="700">
+                                                {`${label}: `}
+                                              </Text>
+                                              {rest}
+                                            </Text>
+                                          );
+                                        }
+                                        return (
+                                          <Text
+                                            key={`${idx}-reason-${lineIdx}`}
+                                            color="gray.700"
+                                            mt={lineIdx === 0 ? 0 : 2}
+                                          >
+                                            <Text as="span" fontWeight="700">
+                                              {indexText}
+                                            </Text>
+                                            {line}
+                                          </Text>
+                                        );
+                                      })()
+                                    ))}
+                                  </Flex>
+                                ) : (
+                                  <Text color="gray.700">Aún no hay razonamiento disponible.</Text>
+                                )
+                              ) : (
+                                <Text color="gray.700">El razonamiento estará disponible cuando el proceso finalice.</Text>
+                              )
+                            )}
+                          </Box>
+                        )}
+
+                        {Array.isArray(item.formatted?.datos) && item.formatted.datos.length > 0 && (
                           <Box overflowX="auto">
                             <Table size="sm" variant="simple">
                               <Thead>
@@ -791,78 +1116,69 @@ export default function Chat() {
                                 </Tr>
                               </Thead>
                               <Tbody>
-                                {item.formatted.datos.map(
-                                  (row: Record<string, any>, rowIdx: number) => (
-                                    <Tr key={rowIdx}>
-                                      {Object.keys(item.formatted.datos[0] || {}).map((key) => (
-                                        <Td key={key}>
-                                          {typeof row[key] === 'number'
-                                            ? row[key].toLocaleString('es-MX')
-                                            : String(row[key])}
-                                        </Td>
-                                      ))}
-                                    </Tr>
-                                  ),
-                                )}
+                                {item.formatted.datos.map((row: Record<string, any>, rowIdx: number) => (
+                                  <Tr key={rowIdx}>
+                                    {Object.keys(item.formatted.datos[0] || {}).map((key) => (
+                                      <Td key={key}>
+                                        {typeof row[key] === 'number'
+                                          ? row[key].toLocaleString('es-MX')
+                                          : String(row[key])}
+                                      </Td>
+                                    ))}
+                                  </Tr>
+                                ))}
                               </Tbody>
                             </Table>
                           </Box>
                         )}
-                      {item.formatted?.insight && (
-                        <Box>
-                          <Text fontWeight="700" color={textColor} mb="6px">
-                            Insight
-                          </Text>
-                          <Text color={textColor}>{item.formatted.insight}</Text>
-                        </Box>
-                      )}
-                      {item.formatted?.html_url && (
-                        <Box>
-                          <Text fontWeight="700" color={textColor} mb="6px">
-                            Gráfica
-                          </Text>
-                          <Box
-                            as="iframe"
-                            src={item.formatted.html_url}
-                            width="100%"
-                            height="400px"
-                            border="none"
-                            borderRadius="8px"
-                          />
-                        </Box>
-                      )}
-                      {item.formatted?.link_power_bi && (
-                        <Box>
-                          <Text fontWeight="700" color={textColor} mb="6px">
-                            Power BI
-                          </Text>
-                          <a
-                            href={item.formatted.link_power_bi}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <Text color={brandColor} textDecoration="underline">
-                              Ver reporte
+
+                        {item.formatted?.insight && (
+                          <Box>
+                            <Text fontWeight="700" color={textColor} mb="6px">
+                              Insight
                             </Text>
-                          </a>
-                        </Box>
-                      )}
-                    </>
-                  )}
-                </Flex>
-              </Box>
-            );
-          })}
+                            <Text color={textColor}>{item.formatted.insight}</Text>
+                          </Box>
+                        )}
+
+                        {item.formatted?.html_url && (
+                          <Box>
+                            <Text fontWeight="700" color={textColor} mb="6px">
+                              Gráfica
+                            </Text>
+                            <Box as="iframe" src={item.formatted.html_url} width="100%" height="400px" border="none" borderRadius="8px" />
+                          </Box>
+                        )}
+
+                        {item.formatted?.link_power_bi && (
+                          <Box>
+                            <Text fontWeight="700" color={textColor} mb="6px">
+                              Power BI
+                            </Text>
+                            <a href={item.formatted.link_power_bi} target="_blank" rel="noreferrer">
+                              <Text color={brandColor} textDecoration="underline">Ver reporte</Text>
+                            </a>
+                          </Box>
+                        )}
+                      </>
+                    )}
+                  </Flex>
+                </Box>
+              );
+              })
+            )}
           </Flex>
         </Flex>
       </Flex>
-      {/* Chat Input */}
-      <Flex
-        position="fixed"
-        bottom="0"
-        left="0"
-        right="0"
-        px={{ base: '12px', md: '24px' }}
+
+      {/* Chat input */}
+      {activeView === 'chat' && (
+        <Flex
+          position="fixed"
+          bottom="0"
+          left={sidebarExpanded ? '180px' : '90px'}
+          right="0"
+          px={{ base: '12px', md: '24px' }}
           justify="center"
           zIndex="50"
         >
@@ -906,12 +1222,9 @@ export default function Chat() {
               w={{ base: '120px', md: '160px' }}
               h="50px"
               _hover={{
-                boxShadow:
-                  '0px 18px 30px -12px rgba(15, 76, 155, 0.45) !important',
+                boxShadow: '0px 18px 30px -12px rgba(15, 76, 155, 0.45) !important',
                 bg: '#0d3f81 !important',
-                _disabled: {
-                  bg: brandColor,
-                },
+                _disabled: { bg: brandColor },
               }}
               _active={{ bg: '#0b366f' }}
               onClick={handleTranslate}
@@ -921,25 +1234,7 @@ export default function Chat() {
             </Button>
           </Flex>
         </Flex>
-
+      )}
     </Flex>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
