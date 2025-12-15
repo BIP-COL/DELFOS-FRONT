@@ -17,9 +17,22 @@ import {
   Td,
   Progress,
   Icon,
+  Portal,
 } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
-import { FiSearch, FiBarChart2, FiMenu, FiFilter, FiClock, FiFileText } from 'react-icons/fi';
+import { useEffect, useRef, useState } from 'react';
+import {
+  FiSearch,
+  FiBarChart2,
+  FiMenu,
+  FiFilter,
+  FiClock,
+  FiFileText,
+  FiChevronLeft,
+  FiChevronRight,
+  FiX,
+  FiArrowLeft,
+} from 'react-icons/fi';
+import { SearchBar } from '@/components/navbar/searchBar/SearchBar';
 
 type StreamEvent = { step: string; payload: any };
 
@@ -272,6 +285,12 @@ export default function Chat() {
   const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(false);
   const [activeView, setActiveView] = useState<'chat' | 'reports'>('chat');
   const [reportsQuery, setReportsQuery] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [searchMatches, setSearchMatches] = useState<HTMLElement[]>([]);
+  const [activeMatchIndex, setActiveMatchIndex] = useState<number>(0);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedReport, setSelectedReport] = useState<any | null>(null);
   const thinkingWords = ['Pensando', 'Analizando', 'Consultando', 'Procesando'];
   const [thinkingIndex, setThinkingIndex] = useState<number>(0);
   const [dots, setDots] = useState<string>('');
@@ -316,6 +335,73 @@ export default function Chat() {
     },
   ];
 
+  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const clearHighlights = () => {
+    if (!contentRef.current) return;
+    const highlighted = Array.from(
+      contentRef.current.querySelectorAll('span[data-search-highlight="true"]'),
+    );
+    highlighted.forEach((span) => {
+      const parent = span.parentNode;
+      if (!parent) return;
+      parent.replaceChild(document.createTextNode(span.textContent || ''), span);
+      parent.normalize();
+    });
+  };
+
+  const applyHighlights = (term: string) => {
+    if (!contentRef.current || !term.trim()) return;
+    const regex = new RegExp(`(${escapeRegExp(term)})`, 'ig');
+    const walker = document.createTreeWalker(contentRef.current, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const parentEl = node.parentElement;
+      if (parentEl && parentEl.closest('[data-searchable="true"]')) {
+        textNodes.push(node);
+      }
+    }
+
+    textNodes.forEach((textNode) => {
+      const text = textNode.data;
+      if (!regex.test(text)) {
+        regex.lastIndex = 0;
+        return;
+      }
+      regex.lastIndex = 0;
+      const fragment = document.createDocumentFragment();
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(text)) !== null) {
+        const start = match.index;
+        const end = regex.lastIndex;
+        if (start > lastIndex) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+        }
+        const span = document.createElement('span');
+        span.textContent = text.slice(start, end);
+        span.setAttribute('data-search-highlight', 'true');
+        span.style.backgroundColor = '#e8f1ff';
+        span.style.borderRadius = '4px';
+        span.style.padding = '0 2px';
+        fragment.appendChild(span);
+        lastIndex = end;
+      }
+      if (lastIndex < text.length) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+      }
+      textNode.replaceWith(fragment);
+    });
+  };
+
+  const refreshHighlights = (term: string) => {
+    clearHighlights();
+    if (term.trim()) {
+      applyHighlights(term);
+    }
+  };
+
   const normalizeText = (s: string) =>
     (s || '')
       .normalize('NFD')
@@ -326,6 +412,55 @@ export default function Chat() {
   const filteredReports = normalizedQuery
     ? reportsData.filter((item) => normalizeText(item.title).includes(normalizedQuery))
     : reportsData;
+
+  const recomputeMatches = (term: string) => {
+    if (!contentRef.current) return;
+    refreshHighlights(term);
+    if (!term.trim()) {
+      setSearchMatches([]);
+      setActiveMatchIndex(0);
+      return;
+    }
+    const matches = Array.from(
+      contentRef.current.querySelectorAll('span[data-search-highlight="true"]'),
+    ) as HTMLElement[];
+    setSearchMatches(matches);
+    setActiveMatchIndex(matches.length > 0 ? 0 : 0);
+    if (matches.length > 0) {
+      matches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const handleSearchChange = (e: any) => {
+    const term = e.target.value;
+    setSearchTerm(term);
+    if (activeView === 'chat') {
+      recomputeMatches(term);
+    }
+  };
+
+  const handleSearchKeyDown = (e: any) => {
+    if (e.key === 'Enter') {
+      goToMatch(1);
+    }
+    if (e.key === 'Escape') {
+      clearSearch();
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchTerm('');
+    setSearchMatches([]);
+    setActiveMatchIndex(0);
+    refreshHighlights('');
+  };
+
+  const goToMatch = (step: number) => {
+    if (searchMatches.length === 0) return;
+    const nextIndex = (activeMatchIndex + step + searchMatches.length) % searchMatches.length;
+    setActiveMatchIndex(nextIndex);
+    searchMatches[nextIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   const handleTranslate = async () => {
     const maxCodeLength = 700;
@@ -457,6 +592,10 @@ export default function Chat() {
   };
 
   const handleChange = (e: any) => setInputCode(e.target.value);
+  const handleSelectReport = (report: any) => {
+    setSelectedReport(report);
+    window?.scrollTo?.({ top: 0, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -465,6 +604,12 @@ export default function Chat() {
       document.body.style.overflow = originalOverflow;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeView !== 'chat') {
+      clearSearch();
+    }
+  }, [activeView]);
 
   return (
     <Flex
@@ -479,6 +624,74 @@ export default function Chat() {
       direction="row"
       overflow="hidden"
     >
+      {activeView === 'chat' && (
+        <Portal>
+          <Flex
+            position="fixed"
+            top="24px"
+            right={{ base: '16px', md: '40px' }}
+            zIndex="2000"
+            gap="8px"
+            align="center"
+          >
+            <SearchBar
+              borderRadius="36px"
+              w={{ base: '260px', md: '360px' }}
+              size="lg"
+              value={searchTerm}
+              onChange={handleSearchChange}
+              onKeyDown={handleSearchKeyDown}
+              inputRef={searchInputRef}
+              placeholder="Buscar"
+            />
+            {searchTerm && (
+              <Flex
+                align="center"
+                gap="4px"
+                bg="white"
+                borderRadius="30px"
+                boxShadow="sm"
+                px="6px"
+                py="4px"
+              >
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => goToMatch(-1)}
+                  isDisabled={searchMatches.length === 0}
+                  leftIcon={<FiChevronLeft />}
+                >
+                  Prev
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => goToMatch(1)}
+                  isDisabled={searchMatches.length === 0}
+                  rightIcon={<FiChevronRight />}
+                >
+                  Next
+                </Button>
+                <Text fontSize="xs" color="gray.600">
+                  {searchMatches.length > 0
+                    ? `${activeMatchIndex + 1}/${searchMatches.length}`
+                    : '0/0'}
+                </Text>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={clearSearch}
+                  isDisabled={!searchTerm}
+                  leftIcon={<FiX />}
+                >
+                  Limpiar
+                </Button>
+              </Flex>
+            )}
+          </Flex>
+        </Portal>
+      )}
+
       {/* Sidebar estilo Canva */}
       <Flex
         position="fixed"
@@ -538,6 +751,36 @@ export default function Chat() {
       >
         {sidebarExpanded ? 'Informes' : ''}
       </Button>
+        <Flex
+          mt="auto"
+          w="100%"
+          direction="row"
+          align="center"
+          justify="center"
+          gap="10px"
+          pb="12px"
+        >
+          <Box
+            w="48px"
+            h="48px"
+            borderRadius="full"
+            bg={brandColor}
+            color="white"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            fontWeight="700"
+            fontSize="sm"
+            boxShadow="0 8px 20px rgba(15, 76, 155, 0.18)"
+          >
+            AL
+          </Box>
+          {sidebarExpanded && (
+            <Text color={textColor} fontWeight="700" fontSize="sm" textAlign="left">
+              Andres Leon
+            </Text>
+          )}
+        </Flex>
     </Flex>
 
       {/* Main scrollable area */}
@@ -552,48 +795,64 @@ export default function Chat() {
         pb={{ base: '80px', md: '64px' }}
         pl={sidebarExpanded ? '220px' : '120px'}
         pr={{ base: 4, md: 6 }}
+        alignItems={activeView === 'chat' ? 'center' : 'flex-start'}
+        border="none"
+        outline="none"
+        boxShadow="none"
+        ref={contentRef}
       >
-        <Flex direction="column" w="100%" maxW="unset" mx="0" mb="8px">
+        <Flex
+        direction="column"
+        w="100%"
+        maxW={activeView === 'chat' ? '840px' : 'unset'}
+        mx={activeView === 'chat' ? 'auto' : '0'}
+        mb="8px"
+        border="none"
+        outline="none"
+        boxShadow="none"
+      >
           <Flex w="100%" direction="column" gap="20px">
             {activeView === 'reports' ? (
               <Box w="100%" pt="20px" pb="40px">
-                <Box mb="16px" display="flex" flexDir="column" alignItems="center">
-                  <Text fontSize="3xl" fontWeight="800" color={textColor} mb="12px" textAlign="center">
-                    Todos los informes
-                  </Text>
-                  <Flex
-                    align="center"
-                    bg="white"
-                    borderRadius="32px"
-                    px={{ base: '14px', md: '18px' }}
-                    py={{ base: '10px', md: '12px' }}
-                    boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
-                    border="1px solid"
-                    borderColor={reportsSearchBorder}
-                    w="100%"
-                    maxW="720px"
-                    gap="10px"
-                    mx="auto"
-                  >
-                    <Icon as={FiSearch} color={brandColor} w="20px" h="20px" />
-                    <Input
-                      placeholder="Buscar en todos los informes"
-                      border="none"
-                      _focus={{ boxShadow: 'none' }}
-                      fontSize="md"
-                      color={textColor}
-                      value={reportsQuery}
-                      onChange={(e) => setReportsQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          setReportsQuery('');
-                        }
-                      }}
-                    />
-                  </Flex>
-                </Box>
+                {!selectedReport && (
+                  <Box mb="16px" display="flex" flexDir="column" alignItems="center">
+                    <Text fontSize="3xl" fontWeight="800" color={textColor} mb="12px" textAlign="center">
+                      Todos los informes
+                    </Text>
+                    <Flex
+                      align="center"
+                      bg="white"
+                      borderRadius="32px"
+                      px={{ base: '14px', md: '18px' }}
+                      py={{ base: '10px', md: '12px' }}
+                      boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
+                      border="1px solid"
+                      borderColor={reportsSearchBorder}
+                      w="100%"
+                      maxW="720px"
+                      gap="10px"
+                      mx="auto"
+                    >
+                      <Icon as={FiSearch} color={brandColor} w="20px" h="20px" />
+                      <Input
+                        placeholder="Buscar en todos los informes"
+                        border="none"
+                        _focus={{ boxShadow: 'none' }}
+                        fontSize="md"
+                        color={textColor}
+                        value={reportsQuery}
+                        onChange={(e) => setReportsQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setReportsQuery('');
+                          }
+                        }}
+                      />
+                    </Flex>
+                  </Box>
+                )}
 
-                {normalizedQuery && (
+                {normalizedQuery && !selectedReport && (
                   <Box
                     mt="8px"
                     px="12px"
@@ -612,7 +871,7 @@ export default function Chat() {
                   </Box>
                 )}
 
-                {filteredReports.length === 0 && normalizedQuery ? (
+                {filteredReports.length === 0 && normalizedQuery && !selectedReport ? (
                   <Flex
                     direction="column"
                     align="center"
@@ -627,133 +886,98 @@ export default function Chat() {
                       No encontramos resultados para "{reportsQuery}"
                     </Text>
                   </Flex>
-                ) : (
-                <>
-                <Box mt="20px" display="none">
-                  <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
-                    Recientes
-                  </Text>
-                  <Flex mt="12px" gap="16px" flexWrap="wrap">
+                ) : null}
+
+                {!selectedReport && (
+                  <Box mt="20px">
+                    <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
+                      Informes
+                    </Text>
+                    <Flex mt="12px" gap="16px" flexWrap="wrap">
+                      {filteredReports.length === 0 ? (
+                        <Text color="gray.500">Sin resultados.</Text>
+                      ) : (
+                        filteredReports.map((item, idx) => (
+                          <Box
+                            key={`informes-${idx}`}
+                            w={{ base: '100%', sm: '260px' }}
+                            bg="white"
+                            borderRadius="16px"
+                            border="1px solid"
+                            borderColor={borderColor}
+                            boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
+                            p="16px"
+                            cursor="pointer"
+                            _hover={{ transform: 'translateY(-4px)', boxShadow: '0 12px 28px rgba(15, 76, 155, 0.18)' }}
+                            transition="all 0.15s ease"
+                            onClick={() => handleSelectReport(item)}
+                          >
+                            <Flex align="center" justify="space-between" mb="10px">
+                              <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
+                              <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
+                                <Icon as={FiClock} w="14px" h="14px" />
+                                <Text>{item.timeLabel}</Text>
+                              </Flex>
+                            </Flex>
+                            <Text fontWeight="700" color={textColor} mb="6px">
+                              {item.title}
+                            </Text>
+                            <Text color="gray.600" fontSize="sm" mb="10px">
+                              {item.description}
+                            </Text>
+                            <Text color="gray.600" fontSize="sm" fontWeight="600">
+                              Propietario: {item.owner}
+                            </Text>
+                          </Box>
+                        ))
+                      )}
+                    </Flex>
+                  </Box>
+                )}
+
+                {selectedReport && (
+                  <Box
+                    mt="12px"
+                    bg="white"
+                    borderRadius="16px"
+                    boxShadow="0 12px 30px rgba(15, 76, 155, 0.12)"
+                    p={{ base: 4, md: 6 }}
+                  >
+                    <Flex align="center" mb="12px" gap="12px">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        leftIcon={<FiArrowLeft />}
+                        onClick={() => setSelectedReport(null)}
+                      >
+                        Volver
+                      </Button>
+                      <Text fontSize="2xl" fontWeight="800" color={textColor}>
+                        {selectedReport.title}
+                      </Text>
+                    </Flex>
+                    <Text color="gray.600" mb="8px">
+                      {selectedReport.description}
+                    </Text>
+                    <Text color="gray.600" fontWeight="600" mb="16px">
+                      Propietario: {selectedReport.owner}
+                    </Text>
                     <Box
-                      w={{ base: '100%', sm: '260px' }}
-                      bg="white"
+                      w="100%"
+                      h="380px"
+                      border="1px dashed"
+                      borderColor={reportsSearchBorder}
                       borderRadius="16px"
-                      border="1px solid"
-                      borderColor={borderColor}
-                      boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
-                      p="16px"
-                      cursor="pointer"
-                      _hover={{ transform: 'translateY(-4px)', boxShadow: '0 12px 28px rgba(15, 76, 155, 0.18)' }}
-                      transition="all 0.15s ease"
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      bg="white"
                     >
-                      <Flex align="center" justify="space-between" mb="10px">
-                        <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
-                        <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
-                          <Icon as={FiClock} w="14px" h="14px" />
-                          <Text>hace 2 días</Text>
-                        </Flex>
-                      </Flex>
-                      <Text fontWeight="700" color={textColor} mb="6px">
-                        Informe comercial
-                      </Text>
-                      <Text color="gray.600" fontSize="sm" mb="10px">
-                        Ventas por tipo de producto y región.
-                      </Text>
-                      <Text color="gray.600" fontSize="sm" fontWeight="600">
-                        Propietario: Andres Leon
+                      <Text color="gray.500" fontWeight="600">
+                        Aquí irán las gráficas del informe
                       </Text>
                     </Box>
-                  </Flex>
-                </Box>
-
-                <Box mt="24px" display="none">
-                  <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
-                    Informes
-                  </Text>
-                  <Flex mt="12px" gap="16px" flexWrap="wrap">
-                    {filteredReports.length === 0 ? (
-                      <Text color="gray.500">Sin resultados.</Text>
-                    ) : (
-                      filteredReports.map((item, idx) => (
-                        <Box
-                          key={`report-${idx}`}
-                          w={{ base: '100%', sm: '260px' }}
-                          bg="white"
-                          borderRadius="16px"
-                          border="1px solid"
-                          borderColor={borderColor}
-                          boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
-                          p="16px"
-                          cursor="pointer"
-                          _hover={{ transform: 'translateY(-4px)', boxShadow: '0 12px 28px rgba(15, 76, 155, 0.18)' }}
-                          transition="all 0.15s ease"
-                        >
-                          <Flex align="center" justify="space-between" mb="10px">
-                            <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
-                            <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
-                              <Icon as={FiClock} w="14px" h="14px" />
-                              <Text>{item.timeLabel}</Text>
-                            </Flex>
-                          </Flex>
-                          <Text fontWeight="700" color={textColor} mb="6px">
-                            {item.title}
-                          </Text>
-                          <Text color="gray.600" fontSize="sm" mb="10px">
-                            {item.description}
-                          </Text>
-                          <Text color="gray.600" fontSize="sm" fontWeight="600">
-                            Propietario: {item.owner}
-                          </Text>
-                        </Box>
-                      ))
-                    )}
-                  </Flex>
-                </Box>
-
-                <Box mt="20px">
-                  <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
-                    Informes
-                  </Text>
-                  <Flex mt="12px" gap="16px" flexWrap="wrap">
-                    {filteredReports.length === 0 ? (
-                      <Text color="gray.500">Sin resultados.</Text>
-                    ) : (
-                      filteredReports.map((item, idx) => (
-                        <Box
-                          key={`informes-${idx}`}
-                          w={{ base: '100%', sm: '260px' }}
-                          bg="white"
-                          borderRadius="16px"
-                          border="1px solid"
-                          borderColor={borderColor}
-                          boxShadow="0 8px 20px rgba(15, 76, 155, 0.12)"
-                          p="16px"
-                          cursor="pointer"
-                          _hover={{ transform: 'translateY(-4px)', boxShadow: '0 12px 28px rgba(15, 76, 155, 0.18)' }}
-                          transition="all 0.15s ease"
-                        >
-                          <Flex align="center" justify="space-between" mb="10px">
-                            <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
-                            <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
-                              <Icon as={FiClock} w="14px" h="14px" />
-                              <Text>{item.timeLabel}</Text>
-                            </Flex>
-                          </Flex>
-                          <Text fontWeight="700" color={textColor} mb="6px">
-                            {item.title}
-                          </Text>
-                          <Text color="gray.600" fontSize="sm" mb="10px">
-                            {item.description}
-                          </Text>
-                          <Text color="gray.600" fontSize="sm" fontWeight="600">
-                            Propietario: {item.owner}
-                          </Text>
-                        </Box>
-                      ))
-                    )}
-                  </Flex>
-                </Box>
-                </>
+                  </Box>
                 )}
               </Box>
             ) : (
@@ -767,7 +991,13 @@ export default function Chat() {
               const shouldShowReasoningPanel = workflowComplete;
 
               return (
-                <Box key={`hist-${idx}`} w="100%" borderRadius="16px" p="6px">
+                <Box
+                  key={`hist-${idx}`}
+                  w="100%"
+                  borderRadius="16px"
+                  p="6px"
+                  data-searchable="true"
+                >
                   {/* Question bubble */}
                   <Flex w="100%" justify="flex-end" mb="12px">
                     <Box
@@ -789,6 +1019,7 @@ export default function Chat() {
                         borderBottom: '10px solid transparent',
                         borderLeft: `12px solid ${bubbleTailColor}`,
                       }}
+                      data-searchable="true"
                     >
                       <Text color={textColor} fontWeight="700" fontSize={{ base: 'sm', md: 'md' }} lineHeight={{ base: '22px', md: '24px' }}>
                         {item.question}
