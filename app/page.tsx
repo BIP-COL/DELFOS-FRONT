@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 /* eslint-disable */
 
 import { ChatBody } from '@/types/types';
@@ -18,6 +18,22 @@ import {
   Progress,
   Icon,
   Portal,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  IconButton,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalCloseButton,
+  ModalBody,
+  VStack,
+  FormControl,
+  FormLabel,
+  useDisclosure,
+  useToast,
 } from '@chakra-ui/react';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -31,6 +47,9 @@ import {
   FiChevronRight,
   FiX,
   FiArrowLeft,
+  FiMoreVertical,
+  FiFolder,
+  FiPlus,
 } from 'react-icons/fi';
 import { SearchBar } from '@/components/navbar/searchBar/SearchBar';
 
@@ -295,6 +314,25 @@ export default function Chat() {
   const [thinkingIndex, setThinkingIndex] = useState<number>(0);
   const [dots, setDots] = useState<string>('');
 
+  // Projects State
+  const [projects, setProjects] = useState<any[]>([]);
+  const [projectItems, setProjectItems] = useState<any[]>([]);
+  const [loadingItems, setLoadingItems] = useState<boolean>(false);
+  const [selectedGraphToAdd, setSelectedGraphToAdd] = useState<{ url: string; type: string; title?: string } | null>(null);
+
+  // Modal State
+  const {
+    isOpen: isProjectModalOpen,
+    onOpen: onProjectModalOpen,
+    onClose: onProjectModalClose
+  } = useDisclosure();
+
+  // Form State
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [newProjectData, setNewProjectData] = useState({ title: '', description: '' });
+
+  const toast = useToast();
+
   useEffect(() => {
     if (!loading) {
       setThinkingIndex(0);
@@ -313,6 +351,76 @@ export default function Chat() {
     return () => clearInterval(interval);
   }, [loading]);
 
+  // Load projects from Backend on startup
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/projects');
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data);
+      }
+    } catch (e) {
+      console.error("Error fetching projects", e);
+    }
+  };
+
+  const handleOpenAddToProject = (url: string, type: string, title?: string) => {
+    setSelectedGraphToAdd({ url, type, title });
+    setIsCreatingProject(false);
+    onProjectModalOpen();
+  };
+
+  const handleAddToProject = async (projectId: string) => {
+    if (!selectedGraphToAdd) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: selectedGraphToAdd.type,
+          content: selectedGraphToAdd.url,
+          title: selectedGraphToAdd.title || 'Nueva gráfica',
+        })
+      });
+
+      if (res.ok) {
+        toast({ title: 'Gráfica guardada exitosamente.', status: 'success', duration: 3000 });
+        onProjectModalClose();
+      } else {
+        toast({ title: 'Error al guardar.', status: 'error' });
+      }
+    } catch (e) {
+      toast({ title: 'Error de conexión.', status: 'error' });
+    }
+  };
+
+  const handleCreateProject = async () => {
+    if (!newProjectData.title) return;
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newProjectData.title,
+          description: newProjectData.description,
+          owner: 'Andres Leon'
+        })
+      });
+
+      if (res.ok) {
+        const newProject = await res.json();
+        setProjects(prev => [newProject, ...prev]);
+        handleAddToProject(newProject.id);
+      }
+    } catch (e) {
+      toast({ title: 'Error al crear proyecto.', status: 'error' });
+    }
+  };
+
   const borderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
   const inputColor = useColorModeValue('navy.700', 'white');
   const brandColor = '#0F4C9B';
@@ -325,15 +433,6 @@ export default function Chat() {
   );
   const reportsSearchBorder = useColorModeValue('#d7ddff', '#334');
   const hasHistory = history.length > 0;
-
-  const reportsData = [
-    {
-      title: 'Informe comercial',
-      description: 'Ventas por tipo de producto y region.',
-      owner: 'Andres Leon',
-      timeLabel: 'hace 2 dias',
-    },
-  ];
 
   const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -409,9 +508,9 @@ export default function Chat() {
       .toLowerCase()
       .trim();
   const normalizedQuery = normalizeText(reportsQuery);
-  const filteredReports = normalizedQuery
-    ? reportsData.filter((item) => normalizeText(item.title).includes(normalizedQuery))
-    : reportsData;
+  const filteredProjects = normalizedQuery
+    ? projects.filter((item) => normalizeText(item.title).includes(normalizedQuery))
+    : projects;
 
   const recomputeMatches = (term: string) => {
     if (!contentRef.current) return;
@@ -592,8 +691,29 @@ export default function Chat() {
   };
 
   const handleChange = (e: any) => setInputCode(e.target.value);
+
+  const fetchProjectItems = async (projectId: string) => {
+    setLoadingItems(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/items`);
+      if (res.ok) {
+        const data = await res.json();
+        setProjectItems(data);
+      } else {
+        setProjectItems([]);
+      }
+    } catch (e) {
+      console.error("Error fetching project items", e);
+      setProjectItems([]);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
   const handleSelectReport = (report: any) => {
     setSelectedReport(report);
+    setProjectItems([]); // Clear previous items
+    fetchProjectItems(report.id); // Fetch items for this project
     window?.scrollTo?.({ top: 0, behavior: 'smooth' });
   };
 
@@ -749,7 +869,7 @@ export default function Chat() {
         onClick={() => setActiveView('reports')}
         bg={activeView === 'reports' ? useColorModeValue('white', 'whiteAlpha.200') : 'transparent'}
       >
-        {sidebarExpanded ? 'Informes' : ''}
+        {sidebarExpanded ? 'Proyectos' : ''}
       </Button>
         <Flex
           mt="auto"
@@ -817,7 +937,7 @@ export default function Chat() {
                 {!selectedReport && (
                   <Box mb="16px" display="flex" flexDir="column" alignItems="center">
                     <Text fontSize="3xl" fontWeight="800" color={textColor} mb="12px" textAlign="center">
-                      Todos los informes
+                      Todos los proyectos
                     </Text>
                     <Flex
                       align="center"
@@ -835,7 +955,7 @@ export default function Chat() {
                     >
                       <Icon as={FiSearch} color={brandColor} w="20px" h="20px" />
                       <Input
-                        placeholder="Buscar en todos los informes"
+                        placeholder="Buscar en todos los proyectos"
                         border="none"
                         _focus={{ boxShadow: 'none' }}
                         fontSize="md"
@@ -871,7 +991,7 @@ export default function Chat() {
                   </Box>
                 )}
 
-                {filteredReports.length === 0 && normalizedQuery && !selectedReport ? (
+                {filteredProjects.length === 0 && normalizedQuery && !selectedReport ? (
                   <Flex
                     direction="column"
                     align="center"
@@ -891,15 +1011,15 @@ export default function Chat() {
                 {!selectedReport && (
                   <Box mt="20px">
                     <Text fontSize="xl" fontWeight="700" color={textColor} mb="12px">
-                      Informes
+                      Proyectos
                     </Text>
                     <Flex mt="12px" gap="16px" flexWrap="wrap">
-                      {filteredReports.length === 0 ? (
-                        <Text color="gray.500">Sin resultados.</Text>
+                      {filteredProjects.length === 0 ? (
+                        <Text color="gray.500">No hay proyectos. Crea uno desde el chat.</Text>
                       ) : (
-                        filteredReports.map((item, idx) => (
+                        filteredProjects.map((item) => (
                           <Box
-                            key={`informes-${idx}`}
+                            key={item.id}
                             w={{ base: '100%', sm: '260px' }}
                             bg="white"
                             borderRadius="16px"
@@ -914,19 +1034,21 @@ export default function Chat() {
                           >
                             <Flex align="center" justify="space-between" mb="10px">
                               <Icon as={FiFileText} color={brandColor} w="20px" h="20px" />
-                              <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
-                                <Icon as={FiClock} w="14px" h="14px" />
-                                <Text>{item.timeLabel}</Text>
-                              </Flex>
+                              {item.created_at && (
+                                <Flex align="center" color="gray.500" fontSize="xs" gap="6px">
+                                  <Icon as={FiClock} w="14px" h="14px" />
+                                  <Text>{new Date(item.created_at).toLocaleDateString('es-ES')}</Text>
+                                </Flex>
+                              )}
                             </Flex>
                             <Text fontWeight="700" color={textColor} mb="6px">
                               {item.title}
                             </Text>
                             <Text color="gray.600" fontSize="sm" mb="10px">
-                              {item.description}
+                              {item.description || 'Sin descripción'}
                             </Text>
                             <Text color="gray.600" fontSize="sm" fontWeight="600">
-                              Propietario: {item.owner}
+                              Propietario: {item.owner || 'Sin asignar'}
                             </Text>
                           </Box>
                         ))
@@ -948,7 +1070,10 @@ export default function Chat() {
                         size="sm"
                         variant="ghost"
                         leftIcon={<FiArrowLeft />}
-                        onClick={() => setSelectedReport(null)}
+                        onClick={() => {
+                          setSelectedReport(null);
+                          setProjectItems([]);
+                        }}
                       >
                         Volver
                       </Button>
@@ -957,26 +1082,76 @@ export default function Chat() {
                       </Text>
                     </Flex>
                     <Text color="gray.600" mb="8px">
-                      {selectedReport.description}
+                      {selectedReport.description || 'Sin descripción'}
                     </Text>
                     <Text color="gray.600" fontWeight="600" mb="16px">
-                      Propietario: {selectedReport.owner}
+                      Propietario: {selectedReport.owner || 'Sin asignar'}
                     </Text>
-                    <Box
-                      w="100%"
-                      h="380px"
-                      border="1px dashed"
-                      borderColor={reportsSearchBorder}
-                      borderRadius="16px"
-                      display="flex"
-                      alignItems="center"
-                      justifyContent="center"
-                      bg="white"
-                    >
-                      <Text color="gray.500" fontWeight="600">
-                        Aquí irán las gráficas del informe
-                      </Text>
-                    </Box>
+
+                    {/* Grid de gráficas */}
+                    {loadingItems ? (
+                      <Flex justify="center" align="center" py="40px">
+                        <Text color="gray.500">Cargando gráficas...</Text>
+                      </Flex>
+                    ) : projectItems.length === 0 ? (
+                      <Box
+                        w="100%"
+                        py="60px"
+                        border="1px dashed"
+                        borderColor={reportsSearchBorder}
+                        borderRadius="16px"
+                        display="flex"
+                        alignItems="center"
+                        justifyContent="center"
+                        bg="gray.50"
+                      >
+                        <Text color="gray.500" fontWeight="600">
+                          No hay gráficas en este proyecto. Agrega una desde el chat.
+                        </Text>
+                      </Box>
+                    ) : (
+                      <Box
+                        display="grid"
+                        gridTemplateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }}
+                        gap="16px"
+                        w="100%"
+                      >
+                        {projectItems.map((item) => (
+                          <Box
+                            key={item.id}
+                            border="1px solid"
+                            borderColor={borderColor}
+                            borderRadius="12px"
+                            overflow="hidden"
+                            bg="white"
+                            boxShadow="0 4px 12px rgba(15, 76, 155, 0.08)"
+                            _hover={{ boxShadow: '0 8px 20px rgba(15, 76, 155, 0.15)' }}
+                            transition="all 0.2s ease"
+                          >
+                            <Box p="12px" borderBottom="1px solid" borderColor={borderColor} bg="gray.50">
+                              <Flex align="center" gap={2}>
+                                <Icon as={FiBarChart2} color={brandColor} />
+                                <Text fontWeight="600" fontSize="sm" color={textColor} noOfLines={1}>
+                                  {item.title || 'Gráfica'}
+                                </Text>
+                              </Flex>
+                              {item.created_at && (
+                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                  {new Date(item.created_at).toLocaleDateString('es-ES')}
+                                </Text>
+                              )}
+                            </Box>
+                            <Box
+                              as="iframe"
+                              src={item.content}
+                              width="100%"
+                              height="280px"
+                              border="none"
+                            />
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -1373,11 +1548,51 @@ export default function Chat() {
                         )}
 
                         {item.formatted?.html_url && (
-                          <Box>
-                            <Text fontWeight="700" color={textColor} mb="6px">
-                              Gráfica
-                            </Text>
-                            <Box as="iframe" src={item.formatted.html_url} width="100%" height="400px" border="none" borderRadius="8px" />
+                          <Box
+                            border="1px solid"
+                            borderColor={borderColor}
+                            borderRadius="12px"
+                            p="10px"
+                            mt="10px"
+                            bg="white"
+                            position="relative"
+                          >
+                            <Flex justify="space-between" align="center" mb="8px" px="4px">
+                              <Text fontWeight="700" color={textColor} fontSize="sm">
+                                Gráfica Generada
+                              </Text>
+
+                              <Menu>
+                                <MenuButton
+                                  as={IconButton}
+                                  icon={<FiMoreVertical />}
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label="Opciones"
+                                />
+                                <MenuList>
+                                  <MenuItem
+                                    icon={<FiFolder />}
+                                    onClick={() => handleOpenAddToProject(
+                                      item.formatted.html_url,
+                                      'html',
+                                      item.formatted.insight || 'Gráfica analítica'
+                                    )}
+                                  >
+                                    Agregar a proyecto
+                                  </MenuItem>
+                                </MenuList>
+                              </Menu>
+                            </Flex>
+
+                            <Box
+                              as="iframe"
+                              src={item.formatted.html_url}
+                              width="100%"
+                              height="400px"
+                              border="none"
+                              borderRadius="8px"
+                            />
                           </Box>
                         )}
 
@@ -1466,6 +1681,92 @@ export default function Chat() {
           </Flex>
         </Flex>
       )}
+
+      {/* Project Modal */}
+      <Modal isOpen={isProjectModalOpen} onClose={onProjectModalClose} isCentered>
+        <ModalOverlay />
+        <ModalContent bg="white">
+          <ModalHeader color="gray.800">Guardar en proyecto</ModalHeader>
+          <ModalCloseButton color="gray.600" />
+          <ModalBody pb={6}>
+            {!isCreatingProject ? (
+              <VStack align="stretch" spacing={3}>
+                <Button
+                  leftIcon={<FiPlus />}
+                  variant="outline"
+                  colorScheme="blue"
+                  w="100%"
+                  onClick={() => setIsCreatingProject(true)}
+                >
+                  Crear nuevo proyecto
+                </Button>
+
+                <Text fontSize="sm" color="gray.600" mt={2} fontWeight="600">Sus proyectos:</Text>
+
+                <Box maxH="300px" overflowY="auto">
+                  {projects.length === 0 ? (
+                    <Text fontSize="sm" color="gray.500" textAlign="center" py={4}>
+                      No hay proyectos. Crea uno nuevo.
+                    </Text>
+                  ) : (
+                    projects.map((proj) => (
+                      <Box
+                        key={proj.id}
+                        p="3"
+                        mb="2"
+                        border="1px solid"
+                        borderColor="gray.300"
+                        borderRadius="md"
+                        cursor="pointer"
+                        bg="gray.50"
+                        _hover={{ bg: "blue.50", borderColor: "blue.400" }}
+                        onClick={() => handleAddToProject(proj.id)}
+                      >
+                        <Flex align="center" gap={2}>
+                          <Icon as={FiFolder} color="blue.500" />
+                          <Text fontWeight="bold" fontSize="sm" color="gray.800">{proj.title}</Text>
+                        </Flex>
+                        {proj.description && <Text fontSize="xs" color="gray.600" mt={1}>{proj.description}</Text>}
+                      </Box>
+                    ))
+                  )}
+                </Box>
+              </VStack>
+            ) : (
+              <VStack spacing={4}>
+                <FormControl>
+                  <FormLabel color="gray.700">Título</FormLabel>
+                  <Input
+                    value={newProjectData.title}
+                    onChange={(e) => setNewProjectData({ ...newProjectData, title: e.target.value })}
+                    color="gray.800"
+                    bg="white"
+                    borderColor="gray.300"
+                    _placeholder={{ color: 'gray.400' }}
+                    placeholder="Nombre del proyecto"
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel color="gray.700">Descripción</FormLabel>
+                  <Input
+                    value={newProjectData.description}
+                    onChange={(e) => setNewProjectData({ ...newProjectData, description: e.target.value })}
+                    color="gray.800"
+                    bg="white"
+                    borderColor="gray.300"
+                    _placeholder={{ color: 'gray.400' }}
+                    placeholder="Descripción opcional"
+                  />
+                </FormControl>
+                <Flex w="100%" gap={2}>
+                  <Button flex="1" onClick={() => setIsCreatingProject(false)} variant="outline" colorScheme="gray">Cancelar</Button>
+                  <Button flex="1" colorScheme="blue" onClick={handleCreateProject}>Guardar</Button>
+                </Flex>
+              </VStack>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </Flex>
   );
 }
