@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 // Prefer explicit env var and fall back to the FastAPI route with /api/chat
 const BACKEND_URL =
   process.env.DELFOS_BACKEND_URL?.trim() ||
-  "http://127.0.0.1:8000/api/chat";
+  "http://localhost:8080/api/chat";
 
 export async function POST(req: Request): Promise<Response> {
   try {
