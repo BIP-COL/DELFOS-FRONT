@@ -55,6 +55,9 @@ import { SearchBar } from '@/components/navbar/searchBar/SearchBar';
 
 type StreamEvent = { step: string; payload: any };
 
+// URL base del backend - usa variable de entorno o fallback
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
 const buildModelReasoning = (events: StreamEvent[]): string[] => {
   if (!Array.isArray(events) || events.length === 0) return [];
 
@@ -358,7 +361,7 @@ export default function Chat() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/projects');
+      const res = await fetch(`${API_BASE_URL}/api/projects`);
       if (res.ok) {
         const data = await res.json();
         setProjects(data);
@@ -377,7 +380,7 @@ export default function Chat() {
   const handleAddToProject = async (projectId: string) => {
     if (!selectedGraphToAdd) return;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/items`, {
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -401,7 +404,7 @@ export default function Chat() {
   const handleCreateProject = async () => {
     if (!newProjectData.title) return;
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/projects', {
+      const res = await fetch(`${API_BASE_URL}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -583,7 +586,7 @@ export default function Chat() {
     const controller = new AbortController();
     const streamUrl =
       process.env.NEXT_PUBLIC_BACKEND_STREAM_URL?.trim() ||
-      'http://127.0.0.1:8000/api/chat/stream';
+      `${API_BASE_URL}/api/chat/stream`;
 
     try {
       const payload = { message: currentMessage, user_id: 'anonymous' };
@@ -695,7 +698,7 @@ export default function Chat() {
   const fetchProjectItems = async (projectId: string) => {
     setLoadingItems(true);
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/items`);
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/items`);
       if (res.ok) {
         const data = await res.json();
         setProjectItems(data);

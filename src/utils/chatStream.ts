@@ -1,7 +1,7 @@
 // src/utils/chatStream.ts (por ejemplo)
 
 const BACKEND_URL =
-  process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 /**
  * Ya no usamos OpenAI directo.
