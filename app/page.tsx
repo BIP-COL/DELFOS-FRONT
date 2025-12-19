@@ -35,7 +35,8 @@ import {
   useDisclosure,
   useToast,
 } from '@chakra-ui/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useLayoutEffect } from 'react';
+import { keyframes } from '@emotion/react';
 import {
   FiSearch,
   FiBarChart2,
@@ -175,7 +176,7 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
       const verificationMsg =
         pickString(payload?.message, payload?.detalle, payload?.descripcion, payload?.reason, payload?.resumen) || '';
       if (isSuccess(payload?.success) || isSuccess(payload?.ok) || isSuccess(payload?.status)) {
-        addLine(stepLabel(identifier) + 'La consulta fue verificada correctamente.');
+        addLine(stepLabel(identifier) + 'La consulta fue verificada correctamente');
       } else if (verificationMsg) {
         addLine(stepLabel(identifier) + `Durante la verificación se encontraron los siguientes puntos: ${verificationMsg}`);
       } else {
@@ -210,7 +211,7 @@ const buildModelReasoning = (events: StreamEvent[]): string[] => {
       if (successFlag) {
         let line = 'La ejecución de la consulta fue exitosa.';
         if (totalFilas !== null) {
-          line += ` Se devolvieron ${totalFilas} filas.`;
+          line += ` Se devolvieron ${totalFilas} filas`;
         }
         addLine(stepLabel(identifier) + line);
       } else if (execMsg) {
@@ -313,12 +314,40 @@ export default function Chat() {
   const thinkingWords = ['Pensando', 'Analizando', 'Consultando', 'Procesando'];
   const [thinkingIndex, setThinkingIndex] = useState<number>(0);
   const [dots, setDots] = useState<string>('');
+  const fadeInUp = keyframes`
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  `;
+
+  useEffect(() => {
+    const container = document.getElementById('chat-scroll-container');
+    if (!container) return;
+    const onScroll = () => {
+      const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+      const nearBottom = distance < 160;
+      if (nearBottom) {
+        setAutoScrollEnabled(true);
+        setShowNewAnswerPrompt(false);
+      } else {
+        setAutoScrollEnabled(false);
+      }
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Projects State
   const [projects, setProjects] = useState<any[]>([]);
   const [projectItems, setProjectItems] = useState<any[]>([]);
   const [loadingItems, setLoadingItems] = useState<boolean>(false);
   const [selectedGraphToAdd, setSelectedGraphToAdd] = useState<{ url: string; type: string; title?: string } | null>(null);
+  const streamRef = useRef<HTMLDivElement | null>(null);
+  const streamEndRef = useRef<HTMLDivElement | null>(null);
+  const streamingStoppedRef = useRef<boolean>(false);
+  const latestQuestionRef = useRef<HTMLDivElement | null>(null);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState<boolean>(true);
+  const [showNewAnswerPrompt, setShowNewAnswerPrompt] = useState<boolean>(false);
+  const isStreamingActive = loading && streamEvents.length > 0 && !isWorkflowComplete(streamEvents);
 
   // Modal State
   const {
@@ -561,6 +590,59 @@ export default function Chat() {
     searchMatches[nextIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
+  const getScrollableParent = (el: HTMLElement | null): HTMLElement | null => {
+    let node: HTMLElement | null = el;
+    while (node) {
+      const style = window.getComputedStyle(node);
+      const canScrollY = /(auto|scroll)/.test(style.overflowY || style.overflow || '');
+      if (canScrollY && node.scrollHeight > node.clientHeight + 1) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return document.scrollingElement as HTMLElement | null;
+  };
+
+  const scrollToBottom = () => {
+    const scrollable =
+      document.getElementById('chat-scroll-container') ||
+      (document.scrollingElement as HTMLElement | null) ||
+      document.documentElement;
+    const anchor = streamEndRef.current;
+    const isDocument =
+      scrollable === document.body ||
+      scrollable === document.documentElement ||
+      scrollable === document.scrollingElement;
+
+    if (anchor && scrollable) {
+      const anchorRect = anchor.getBoundingClientRect();
+      const containerRect = scrollable.getBoundingClientRect();
+      const offset = 90; // espacio controlado para no tapar con el input fijo
+      const delta = anchorRect.bottom - containerRect.bottom + offset;
+
+      const currentTop = isDocument ? window.scrollY : scrollable.scrollTop;
+      const targetTop = Math.max(0, currentTop + delta);
+      const opts: ScrollToOptions = { top: targetTop, behavior: 'smooth' };
+
+      if (isDocument) {
+        window.scrollTo(opts);
+      } else {
+        scrollable.scrollTo(opts);
+      }
+      setShowNewAnswerPrompt(false);
+      setAutoScrollEnabled(true);
+      return;
+    }
+
+    // Fallback a scroll completo
+    const opts: ScrollToOptions = { top: scrollable.scrollHeight, behavior: 'smooth' };
+    if (isDocument) {
+      window.scrollTo(opts);
+    } else {
+      scrollable.scrollTo(opts);
+    }
+  };
+
   const handleTranslate = async () => {
     const maxCodeLength = 700;
     if (!inputCode) {
@@ -578,6 +660,10 @@ export default function Chat() {
     setHistory((prev) => [...prev, { question: currentMessage, formatted: null, reasoning: '', events: [] }]);
     setInputCode('');
     setStreamEvents([]);
+    streamingStoppedRef.current = false;
+    latestQuestionRef.current = null;
+    setAutoScrollEnabled(true);
+    setShowNewAnswerPrompt(false);
     setLoading(true);
 
     const controller = new AbortController();
@@ -624,6 +710,7 @@ export default function Chat() {
             collectedEvents.push({ step: evt.step || evt.type, payload: evt });
             setStreamEvents([...collectedEvents]);
             if ((evt.step || evt.type) === 'complete') {
+              streamingStoppedRef.current = true;
               finalFormatted =
                 evt?.result?.formatted_response ||
                 evt?.result?.formattedResponse ||
@@ -716,6 +803,20 @@ export default function Chat() {
     fetchProjectItems(report.id); // Fetch items for this project
     window?.scrollTo?.({ top: 0, behavior: 'smooth' });
   };
+
+  useLayoutEffect(() => {
+    if (streamingStoppedRef.current) return;
+    const lastEvent = streamEvents[streamEvents.length - 1];
+    const lastStep = String(lastEvent?.step || '').toLowerCase();
+    if (lastStep.includes('complete')) return;
+    if (!isStreamingActive) return;
+    if (!autoScrollEnabled) return;
+    requestAnimationFrame(scrollToBottom);
+  }, [streamEvents, isStreamingActive, autoScrollEnabled]);
+
+  useEffect(() => {
+    // Do not auto-move user after completion; only show prompt
+  }, [loading]);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -908,19 +1009,21 @@ export default function Chat() {
         direction="column"
         flex="1"
         w="100%"
-        minH="0"
-        overflowY="auto"
-        overflowX="hidden"
-        display={activeView === 'reports' || hasHistory ? 'flex' : 'none'}
-        pb={{ base: '80px', md: '64px' }}
-        pl={sidebarExpanded ? '220px' : '120px'}
-        pr={{ base: 4, md: 6 }}
-        alignItems={activeView === 'chat' ? 'center' : 'flex-start'}
-        border="none"
-        outline="none"
-        boxShadow="none"
-        ref={contentRef}
-      >
+      minH="0"
+      overflowY="auto"
+      overflowX="hidden"
+      sx={{ scrollBehavior: 'smooth' }}
+      display={activeView === 'reports' || hasHistory ? 'flex' : 'none'}
+      pb={{ base: '110px', md: '100px' }}
+      pl={sidebarExpanded ? '220px' : '120px'}
+      pr={{ base: 4, md: 6 }}
+      alignItems={activeView === 'chat' ? 'center' : 'flex-start'}
+      border="none"
+      outline="none"
+      boxShadow="none"
+      ref={contentRef}
+      id="chat-scroll-container"
+    >
         <Flex
         direction="column"
         w="100%"
@@ -1176,6 +1279,7 @@ export default function Chat() {
                   {/* Question bubble */}
                   <Flex w="100%" justify="flex-end" mb="12px">
                     <Box
+                      ref={isLatest ? latestQuestionRef : undefined}
                       maxW="70%"
                       p="16px 20px"
                       borderRadius="14px"
@@ -1268,6 +1372,10 @@ export default function Chat() {
                                 payload?.resumen,
                               ) || '';
 
+                            if (id.includes('sql_generation')) {
+                              return 'Se ha generado la consulta SQL';
+                            }
+
                             if (id.includes('triage')) {
                               const reasoning =
                                 pickString(payload?.reasoning, payload?.resumen, payload?.summary, payload?.detalle) || '';
@@ -1278,7 +1386,7 @@ export default function Chat() {
                               const classification =
                                 pickString(payload?.category, payload?.categoria, payload?.domain, payload?.area) || '';
                               if (classification) return `Se clasificó la consulta como ${classification}.`;
-                              return 'La consulta se ha clasificado.';
+                              return 'La consulta se ha clasificado';
                             }
 
                             if (id.includes('intent')) {
@@ -1295,9 +1403,9 @@ export default function Chat() {
                                 asList(payload?.prioritized_tables) ||
                                 asList(payload?.tablas_prioritizadas);
                               if (tables && tables.length > 0) {
-                                return `Las tablas priorizadas son: ${tables.join(', ')}.`;
+                                return `Las tablas priorizadas son: ${tables.join(', ')}`;
                               }
-                              return 'Se han identificado y priorizado las tablas relevantes para la consulta.';
+                              return 'Se han identificado y priorizado las tablas relevantes para la consulta';
                             }
 
                             if (id.includes('sql_generation')) {
@@ -1309,18 +1417,18 @@ export default function Chat() {
                                   payload?.generated_sql,
                                   payload?.sql_query,
                                 ) || '';
-                              if (sql) return `La consulta SQL generada es: ${sql}`;
+                              if (sql) return `Se ha generado la consulta SQL`;
                               return 'El agente generó la consulta SQL para responder a la pregunta.';
                             }
 
                             if (id.includes('verification')) {
                               if (isSuccessLocal(payload?.success) || isSuccessLocal(payload?.ok) || isSuccessLocal(payload?.status)) {
-                                return 'La consulta fue verificada correctamente.';
+                                return 'La consulta fue verificada correctamente';
                               }
                               if (errorMsg) {
                                 return `Durante la verificación se encontraron problemas: ${errorMsg}`;
                               }
-                              return 'Se ha verificado la consistencia de la consulta generada.';
+                              return 'Se ha verificado la consistencia de la consulta generada';
                             }
 
                             if (id.includes('sql_execution')) {
@@ -1347,7 +1455,7 @@ export default function Chat() {
                               if (successFlag) {
                                 let line = 'La ejecución de la consulta fue exitosa.';
                                 if (totalFilas !== null) {
-                                  line += ` Se devolvieron ${totalFilas} filas.`;
+                                  line += ` Se devolvieron ${totalFilas} filas`;
                                 }
                                 return line;
                               }
@@ -1403,8 +1511,17 @@ export default function Chat() {
                           return (
                             <>
                               <Progress value={progressValue} size="sm" mb="10px" w="100%" />
-                              <Flex direction="column" gap="8px" w="100%">
-                                {streamEvents.map((ev, i) => renderStep(ev, i))}
+                              <Flex direction="column" gap="8px" w="100%" ref={streamRef}>
+                                {streamEvents.length > 0 && (() => {
+                                  const idxLast = streamEvents.length - 1;
+                                  const lastEvent = streamEvents[idxLast];
+                                  return (
+                                    <Box key={`${lastEvent.step}-${idxLast}`} animation={`${fadeInUp} 300ms ease`}>
+                                      {renderStep(lastEvent, idxLast)}
+                                    </Box>
+                                  );
+                                })()}
+                                <Box ref={streamEndRef} />
                               </Flex>
                             </>
                           );
@@ -1682,6 +1799,32 @@ export default function Chat() {
         </Flex>
       )}
 
+      {showNewAnswerPrompt && (
+        <Portal>
+          <Box
+            position="fixed"
+            bottom="120px"
+            right={{ base: '16px', md: '40px' }}
+            bg="white"
+            border="1px solid"
+            borderColor="gray.200"
+            boxShadow="0 10px 30px rgba(15, 76, 155, 0.12)"
+            borderRadius="24px"
+            px="14px"
+            py="10px"
+            display="flex"
+            alignItems="center"
+            gap="10px"
+            zIndex={2100}
+          >
+            <Text color={textColor} fontWeight="700">Nueva respuesta</Text>
+            <Button size="sm" colorScheme="blue" onClick={scrollToBottom}>
+              Ver
+            </Button>
+          </Box>
+        </Portal>
+      )}
+
       {/* Project Modal */}
       <Modal isOpen={isProjectModalOpen} onClose={onProjectModalClose} isCentered>
         <ModalOverlay />
@@ -1770,3 +1913,4 @@ export default function Chat() {
     </Flex>
   );
 }
+
